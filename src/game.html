@@ -631,6 +631,11 @@ function signPlane(parent, text, w, h, x, y, z, o = {}){
 const colliders = [];   // axis-aligned boxes
 const circles = [];     // round obstacles
 const WCX = 5, WCZ = -55, BOUND = 166;
+const windU = { value:0 }, FCELL = 44, fcells = new Map(), flora = { ready:false, t:0 };
+let HOUSE_PARENT = null, kit = null; const townHouses = [];
+function fcell(x, z){ const i = Math.floor(x/FCELL), j = Math.floor(z/FCELL), k = i + ',' + j; let c = fcells.get(k);
+  if (!c){ c = { cx:(i + .5)*FCELL, cz:(j + .5)*FCELL, trees:[], near:{}, detail:{}, gNear:new THREE.Group(), gDetail:new THREE.Group(), gFar:new THREE.Group(), gKit:new THREE.Group(), gHouseFar:new THREE.Group() };
+    c.gNear.visible = c.gDetail.visible = c.gKit.visible = false; scene.add(c.gNear, c.gDetail, c.gFar, c.gKit, c.gHouseFar); fcells.set(k, c); } return c; }
 // Places beyond the town are their own little maps, far away on the same grid and reached through a gate
 const ZONES = { town:{ name:'Makhanda', cx:WCX, cz:WCZ, r:BOUND }, gardens:{ name:'Botanical Gardens', cx:3000, cz:0, r:58 } };
 function zoneAt(p){ let best = 'town', bd = 1e12; for (const [k, z] of Object.entries(ZONES)){ const d = Math.hypot(p.x - z.cx, p.z - z.cz); if (d < bd){ bd = d; best = k; } } return best; }
@@ -729,7 +734,7 @@ function win(g, x, y, z, w, h, lit){ box(g, w+.22, h+.22, .08, '#f4efe4', x, y-.
 function winX(g, x, y, z, w, h, s){ box(g, .08, h+.22, w+.22, '#f4efe4', x, y-.11, z, { cast:false }); box(g, .1, h, w, GLASS, x + s*.02, y, z, { cast:false }); }
 
 function cottage(x, z, ry, o = {}){
-  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = ry; world.add(g);
+  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = ry; (HOUSE_PARENT || world).add(g);
   const w = o.w || 9, d = o.d || 8, h = o.h || 3.3;
   if (o.brick === undefined) o.brick = R() < .2;
   const wall = o.wall || (o.brick ? pick(['#a8553c', '#9c4a35', '#b5654a']) : pick(WALLS)), roof = o.roof || pick(ROOFS), trim = '#f6f2ea';
@@ -1071,7 +1076,7 @@ const PASTELS = ['#f1ead9', '#efe2c4', '#e8d2b0', '#dfe6dc', '#f3dcd2', '#e3ecf1
 const FACEBRICK = ['#b5653f', '#9a553a', '#c27a4f', '#8f4f38'];
 const TILES = ['#7a3b2a', '#4a4a4f', '#8a4a32', '#5b3a2e'];
 function victorian(x, z, ry){
-  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = ry; world.add(g);
+  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = ry; (HOUSE_PARENT || world).add(g);
   const w = 10, d = 9, h = 6.6, wall = pick(PASTELS), roof = pick(['#9a3c2c', '#3f6b4a', '#59666b', '#2f5b45']), trim = '#fbf8f1';
   box(g, w, h, d, wall, 0, 0, 0, { detail:'plaster' });
   box(g, w + .2, .3, d + .2, trim, 0, 3.3, 0, { cast:false });
@@ -1089,7 +1094,7 @@ function victorian(x, z, ry){
   solidLocal(g, 0, 0, w, d); return { w, d, kind:'victorian' };
 }
 function faceBrick(x, z, ry){
-  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = ry; world.add(g);
+  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = ry; (HOUSE_PARENT || world).add(g);
   const w = 12, d = 8.5, h = 3, wall = pick(FACEBRICK), roof = pick(TILES);
   box(g, w, h, d, wall, 0, 0, 0, { detail:'brick' });
   mesh(hipGeo(w + 1, d + 1, 2.4), mat(roof, { rough:.7, detail:'roof' }), g, 0, h, 0);
@@ -1100,7 +1105,7 @@ function faceBrick(x, z, ry){
   solidLocal(g, 0, 0, w, d); return { w:w + (carport ? 4 : 0), d, kind:'brick', wall };
 }
 function modernHouse(x, z, ry){
-  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = ry; world.add(g);
+  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = ry; (HOUSE_PARENT || world).add(g);
   const wall = pick(['#ece9e3', '#e2ddd3', '#d6d2ca', '#f2efe9']);
   box(g, 7, 6, 8, wall, -1.8, 0, 0, { detail:'plaster' }); box(g, 7.3, .35, 8.3, '#3c4047', -1.8, 6, 0);
   box(g, 5, 3.2, 9, wall, 4.2, 0, .3, { detail:'plaster' }); box(g, 5.3, .35, 9.3, '#3c4047', 4.2, 3.2, .3);
@@ -1159,11 +1164,12 @@ function dressPlot(x, z, ry, fence, info){
   }
 }
 function house(x, z, ry, fence){
-  const r = R(); let info;
+  const r = R(); let info; HOUSE_PARENT = fcell(x, z).gHouseFar;
   if (r < .4){ const o = { hip:R() < .45, bay:R() < .4 }; cottage(x, z, ry, o); info = { w:9, d:8, kind:'cottage', wall:o.brick ? '#a8553c' : null }; }
   else if (r < .6) info = victorian(x, z, ry);
   else if (r < .85) info = faceBrick(x, z, ry);
   else info = modernHouse(x, z, ry);
+  HOUSE_PARENT = null; townHouses.push({ x, z, ry, info });
   dressPlot(x, z, ry, fence, info);
 }
 for (let x = -145; x <= 146; x += 14){ if (Math.abs(x) < 26) continue; house(x, 3, 0, 11.8); }
@@ -1366,6 +1372,7 @@ function mergeChildren(grp){
 }
 
 mergeStatic(world);
+for (const c of fcells.values()) mergeStatic(c.gHouseFar, 1e6);
 
 /* =========================================================
    Characters
@@ -2314,7 +2321,6 @@ function finishMission(){
    Real models for trees and plants (Quaternius nature kit, CC0).
    Loaded after the town is built; if they can't load, the simple trees stay.
    ========================================================= */
-const windU = { value:0 }, FCELL = 44, fcells = new Map(), flora = { ready:false, t:0 };
 function windy(m, amp){
   m.onBeforeCompile = sh => { sh.uniforms.uWind = windU; sh.vertexShader = 'uniform float uWind;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
   #ifdef USE_INSTANCING
@@ -2326,7 +2332,6 @@ function windy(m, amp){
   transformed.x += sway; transformed.z += sway*.6;`); };
   m.customProgramCacheKey = () => 'wind' + amp;
 }
-function fcell(x, z){ const i = Math.floor(x/FCELL), j = Math.floor(z/FCELL), k = i + ',' + j; let c = fcells.get(k); if (!c){ c = { cx:(i + .5)*FCELL, cz:(j + .5)*FCELL, trees:[], near:{}, detail:{}, gNear:new THREE.Group(), gDetail:new THREE.Group(), gFar:new THREE.Group() }; fcells.set(k, c); } return c; }
 async function loadFlora(){
   if (!townTrees) return;
   try {
@@ -2372,17 +2377,22 @@ async function loadFlora(){
           P.compose(pv.set(x, th + (type === 'cypress' ? 2.6 : 1.3)*sz, z), q.identity(), type === 'cypress' ? sv.set(1.2*sz, 3*sz, 1.2*sz) : sv.set(2.3*sz, 1.9*sz, 2.3*sz)); cr.setMatrixAt(i, P); cr.setColorAt(i, col.set((type === 'jac' ? jacs : type === 'cypress' ? cyp : greens)[i % 2])); });
         tr.computeBoundingSphere(); cr.computeBoundingSphere(); c.gFar.add(tr, cr);
       }
-      c.gNear.visible = c.gDetail.visible = false; scene.add(c.gNear, c.gDetail, c.gFar);
     } }; flora.flush();
     // retire the old town trees (hill trees stay)
     const zero = new THREE.Matrix4().makeScale(0, 0, 0); for (let i = 0; i < townTrees.all.length; i++) townTrees.trunks.setMatrixAt(i, zero); townTrees.trunks.instanceMatrix.needsUpdate = true; townTrees.crowns.visible = false;
-    flora.ready = true; for (const k of Object.keys(ZONES)) if (ZONES[k].built) ZONES[k].plant?.();
+    flora.ready = true;
+    try { const { loadKit } = await import('./kit.js'); kit = await loadKit(THREE, GLTFLoader, 'assets/village/');
+      const PASTEL = ['#fff6e6', '#ffe9d2', '#e9f3ea', '#eaf1fb', '#fff3c9', '#f7e3e3', '#ffffff', '#f2ead9'];
+      for (const h of townHouses){ const k = h.info.kind; kit.house({ x:h.x, z:h.z, ry:h.ry - Math.PI/2, span:8, len:h.info.w >= 12 ? 12 : 10, floors:k === 'victorian' ? 2 : 1, wall:k === 'brick' ? 'UnevenBrick' : 'Plaster', tint:PASTEL[Math.floor(rnd()*PASTEL.length)], vines:true, rnd }); fcell(h.x, h.z).hasKit = true; }
+      kit.flush((x, z) => fcell(x, z).gKit);
+    } catch(e){ console.warn('Building kit not loaded:', e && e.message); kit = null; }
+    for (const k of Object.keys(ZONES)) if (ZONES[k].built) ZONES[k].plant?.();
   } catch(e){ console.warn('Models not loaded, keeping simple trees:', e && e.message); }
 }
 function updateFlora(dt, t){
-  windU.value = t; if (!flora.ready) return; flora.t -= dt; if (flora.t > 0) return; flora.t = .35;
+  windU.value = t; if (!flora.ready && !kit) return; flora.t -= dt; if (flora.t > 0) return; flora.t = .35;
   const rn = quality === 'low' ? 52 : quality === 'medium' ? 72 : 92, rd = quality === 'low' ? 26 : quality === 'medium' ? 36 : 46, cx = camera.position.x, cz = camera.position.z;
-  for (const c of fcells.values()){ const d = Math.hypot(c.cx - cx, c.cz - cz); c.gNear.visible = d < rn; c.gFar.visible = !c.gNear.visible; c.gDetail.visible = d < rd; }
+  for (const c of fcells.values()){ const d = Math.hypot(c.cx - cx, c.cz - cz); c.gNear.visible = !!c.built && d < rn; c.gFar.visible = !c.gNear.visible; c.gDetail.visible = d < rd; c.gKit.visible = !!c.hasKit && d < rn + 12; c.gHouseFar.visible = !c.gKit.visible; }
 }
 
 
