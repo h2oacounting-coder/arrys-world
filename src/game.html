@@ -637,7 +637,7 @@ function fcell(x, z){ const i = Math.floor(x/FCELL), j = Math.floor(z/FCELL), k 
   if (!c){ c = { cx:(i + .5)*FCELL, cz:(j + .5)*FCELL, trees:[], near:{}, detail:{}, gNear:new THREE.Group(), gDetail:new THREE.Group(), gFar:new THREE.Group(), gKit:new THREE.Group(), gHouseFar:new THREE.Group() };
     c.gNear.visible = c.gDetail.visible = c.gKit.visible = false; scene.add(c.gNear, c.gDetail, c.gFar, c.gKit, c.gHouseFar); fcells.set(k, c); } return c; }
 // Places beyond the town are their own little maps, far away on the same grid and reached through a gate
-const ZONES = { town:{ name:'Makhanda', cx:WCX, cz:WCZ, r:BOUND }, gardens:{ name:'Botanical Gardens', cx:3000, cz:0, r:58 } };
+const ZONES = { town:{ name:'Makhanda', cx:WCX, cz:WCZ, r:BOUND }, gardens:{ name:'Botanical Gardens', cx:3000, cz:0, r:58 }, kingswood:{ name:'Kingswood College', cx:6000, cz:0, r:64 } };
 function zoneAt(p){ let best = 'town', bd = 1e12; for (const [k, z] of Object.entries(ZONES)){ const d = Math.hypot(p.x - z.cx, p.z - z.cz); if (d < bd){ bd = d; best = k; } } return best; }
 function solidWorld(cx, cz, w, d){ colliders.push({ x0:cx-w/2, x1:cx+w/2, z0:cz-d/2, z1:cz+d/2 }); }
 function toWorld(g, lx, lz){ const c = Math.cos(g.rotation.y), s = Math.sin(g.rotation.y); return [g.position.x + lx*c + lz*s, g.position.z - lx*s + lz*c]; }
@@ -802,6 +802,10 @@ const PLACES = {
   cathedral: { name:'The Cathedral',    pos:[0, -133],   r:7,   itemAt:[-6, -137]},
   park:      { name:'Jacaranda Park',   pos:[-70, 41],   r:6,   itemAt:[-74, 44] },
   garden:    { name:'Back Garden',      pos:[12, 53],    r:4.5, itemAt:[10, 55] },
+  kwgate:    { name:'Kingswood Gate',   pos:[112, -50],  r:4,   itemAt:[114, -48] },
+  quad:      { name:'The Quad',         pos:[6000, 6],   r:5,   itemAt:[6002, 8] },
+  classroom: { name:'Classroom',        pos:[6028, 3],   r:3.5, itemAt:[6029, 4] },
+  tuck:      { name:'Tuck Shop',        pos:[6021, 31],  r:3.5, itemAt:[6022, 32] },
   botgate:   { name:'Gardens Gate',     pos:[-99, 44],   r:4,   itemAt:[-97, 46] },
   pond:      { name:'Lily Pond',        pos:[2992, 6],   r:4,   itemAt:[2994, 8] },
   fairy:     { name:'Fairy Ring',       pos:[2976, 14],  r:3.5, itemAt:[2977, 15] },
@@ -1932,7 +1936,7 @@ function updateNPCs(dt){
     if (n.still){ n.vx = n.vz = 0; n.physics(dt); n.animate(dt); n.sync(); continue; }
     if (n.wait > 0){ n.wait -= dt; n.moveToward(0, 0, dt); n.animate(dt); n.sync(); continue; }
     const t = n.toB ? n.b : n.a; const dx = t[0] - n.pos.x, dz = t[1] - n.pos.z, d = Math.hypot(dx, dz);
-    if (d < .8){ n.toB = !n.toB; n.wait = 1 + R()*4; if (n.kind === 'kid'){ n.b = [55 + R()*28, -70 - R()*38]; } }
+    if (d < .8){ n.toB = !n.toB; n.wait = 1 + R()*4; if (n.roam) n.b = n.roam(); else if (n.kind === 'kid'){ n.b = [55 + R()*28, -70 - R()*38]; } }
     else n.moveToward(dx/d*n.maxSpeed, dz/d*n.maxSpeed, dt, 6);
     n.animate(dt); n.sync();
   }
@@ -2069,9 +2073,10 @@ function nearestInteraction(){
   for (const n of npcs){ const d = Math.hypot(n.pos.x - p.pos.x, n.pos.z - p.pos.z); if (d < bd){ bd = d; best = { kind:'talk', label:'TALK', npc:n }; } }
   if (best) return best;
   for (const b of benches){ if (Math.hypot(b.x - p.pos.x, b.z - p.pos.z) < 1.9) return { kind:'sit', label:'SIT', bench:b }; }
+  for (const sp of spots){ if (Math.hypot(sp.x - p.pos.x, sp.z - p.pos.z) < sp.r) return { kind:'spot', label:sp.label, spot:sp }; }
   return null;
 }
-let currentInteraction = null;
+let currentInteraction = null; const spots = [];
 function interact(){
   const it = currentInteraction; if (!it) return;
   const p = active();
@@ -2084,6 +2089,7 @@ function interact(){
     tone(520, .06, 'triangle', .08); tone(660, .08, 'triangle', .08, .07);
   }
   else if (it.kind === 'sit'){ const b = it.bench; p.place(b.x + Math.sin(b.face)*.12, b.z + Math.cos(b.face)*.12, b.face); p.pose = { type:'sit', seat: activeId === 'arry' ? .44 : .5 }; }
+  else if (it.kind === 'spot'){ it.spot.fn(it.spot); }
   else if (it.kind === 'stand'){ p.pose = null; p.pos.x += Math.sin(p.face)*.6; p.pos.z += Math.cos(p.face)*.6; }
 }
 function emote(){
@@ -2171,6 +2177,11 @@ const MISSIONS = [
     { t:'mini', game:'stack', label:'Stack a milkshake 8 scoops high' },
     { t:'pickup', item:'milkshake', name:'Milkshakes', label:'Collect the milkshakes', atPlace:'goat' },
     { t:'goto', place:'park', label:'Find a bench in Jacaranda Park' } ] },
+  { id:'kwday', title:'A Day at Kingswood', blurb:'Go through the school gate, ring the bell in the quad, try the blackboard quiz and finish at the tuck shop.', steps:[
+    { t:'goto', place:'kwgate', label:'Find the Kingswood gate' },
+    { t:'goto', place:'quad', label:'Walk to the quad' },
+    { t:'goto', place:'classroom', label:'Find the open classroom' },
+    { t:'goto', place:'tuck', label:'Finish at the tuck shop' } ] },
   { id:'gardens', title:'A Walk in the Botanical Gardens', blurb:'Go through the gate past Jacaranda Park and explore: the lily pond, the fairy ring and the bandstand.', steps:[
     { t:'goto', place:'botgate', label:'Find the Gardens gate past the park' },
     { t:'goto', place:'pond', label:'Find the lily pond' },
@@ -2425,12 +2436,15 @@ function updatePortals(dt, t){
   const p = active().pos, zn = zoneAt(p);
   for (const o of portals){ o.glow.material.opacity = .22 + Math.sin(t*3)*.08; if (o.zone !== zn || portalCool > 0 || state.mode !== 'play') continue;
     const d = Math.hypot(p.x - o.x, p.z - o.z); if (d < 1.25 && !state.inCar) travel(o.toZone, o.tx, o.tz, o.tface); else if (d < 4 && state.inCar && !o.told){ o.told = true; toast('Hop out of the bakkie to walk through the gate'); } }
+  if (zoneLife.bellT > 0){ zoneLife.bellT -= dt; zoneLife.bell.rotation.z = Math.sin(t*26)*.5*zoneLife.bellT; }
   updateZoneLife(dt, t, zn);
 }
-const zoneLife = { bfs:[], frogs:[], doors:[] };
+const zoneLife = { bfs:[], frogs:[], finds:[] };
+function addFind(zid, i, x, z, parent, what, emoji, total){ const found = ((save.finds || {})[zid] || []).includes(i); const halo = mesh(new THREE.SphereGeometry(.5, 10, 8), new THREE.MeshBasicMaterial({ color:'#fff2b0', transparent:true, opacity:found ? 0 : .22, depthWrite:false, blending:THREE.AdditiveBlending }), parent, x, .4, z, false); zoneLife.finds.push({ zid, i, x, z, halo, found, what, emoji, total }); }
 function buildZone(zid){
   const Z = ZONES[zid]; if (!Z || zid === 'town' || Z.built) return; Z.built = true;
   if (zid === 'gardens') buildGardens(Z);
+  if (zid === 'kingswood') buildKingswood(Z);
 }
 function buildGardens(Z){
   const ox = Z.cx, oz = Z.cz, G = new THREE.Group(); scene.add(G);
@@ -2456,14 +2470,76 @@ function buildGardens(Z){
   spots.forEach(([dx, dz], i) => { const d = new THREE.Group(); d.position.set(ox + dx, 0, oz + dz + .55); G.add(d);
     box(d, .42, .6, .06, ['#e8443a', '#3d8bff', '#ffb02e', '#9a6be0', '#5ac06a', '#ff5d9e'][i], 0, 0, 0, { cast:false }); mesh(new THREE.CylinderGeometry(.21, .21, .06, 12, 1, false, 0, Math.PI), mat('#f4efe6'), d, 0, .6, 0, false).rotation.x = Math.PI/2;
     mesh(new THREE.SphereGeometry(.035, 6, 5), mat('#ffd35a', { metal:.6, rough:.3 }), d, .12, .3, .05, false);
-    const halo = mesh(new THREE.SphereGeometry(.5, 10, 8), new THREE.MeshBasicMaterial({ color:'#fff2b0', transparent:true, opacity:found.includes(i) ? 0 : .22, depthWrite:false, blending:THREE.AdditiveBlending }), d, 0, .35, .1, false);
-    zoneLife.doors.push({ i, x:ox + dx, z:oz + dz + .9, halo, found:found.includes(i) }); });
+    addFind('gardens', i, ox + dx, oz + dz + .9, G, 'Fairy door', '🧚', 6); });
   // butterflies drifting about
   for (let i = 0; i < 9; i++){ const g = new THREE.Group(), wm = new THREE.MeshStandardMaterial({ color:pick(['#ff7ab0', '#7ad0ff', '#ff9a3a', '#b48aff', '#ffd23a']), side:THREE.DoubleSide, roughness:.6 }), wg = new THREE.PlaneGeometry(.26, .32); wg.translate(.13, 0, 0);
     const wl = new THREE.Mesh(wg, wm), wr = new THREE.Mesh(wg, wm); wr.scale.x = -1; wl.rotation.x = wr.rotation.x = -Math.PI/2; g.add(wl, wr); g.position.set(ox + (Math.random() - .5)*60, 1.2, oz + (Math.random() - .5)*60); G.add(g); zoneLife.bfs.push({ g, wl, wr, ph:Math.random()*6, tx:g.position.x, tz:g.position.z, ty:1.2 }); }
   addPortal('gardens', ox, oz + 54, 0, 'Back to town', 'town', PLACES.botgate.pos[0] + 3.2, PLACES.botgate.pos[1], Math.PI/2);
   Z.treeSpots = spots.map(([dx, dz]) => [ox + dx, oz + dz]);
   Z.plant = () => plantGardens(Z); if (flora.ready) Z.plant(); else plantGardensSimple(Z, G);
+}
+
+/* ---------- shared helpers for places built from the kit ---------- */
+function bld(G, o){ // a kit building, or a plain block if the kit is not there
+  const turned = Math.abs(Math.sin(o.ry || 0)) > .5, w = turned ? o.len : o.span, d = turned ? o.span : o.len;
+  if (kit) kit.house(o); else { box(G, w, (o.floors || 1)*3, d, o.tint || '#e9dfcf', o.x, 0, o.z, { detail:'plaster' }); mesh(gableGeo(w + .6, d + .6, 2.2), mat('#b5553c', { detail:'roof' }), G, o.x, (o.floors || 1)*3, o.z); }
+  if (o.solid !== false) solidWorld(o.x, o.z, w, d);
+}
+function chalkTex(text){ return textTexture(text, { w:512, h:256, bg:'#2f5d48', fg:'#ffffff', border:'#8b5a34', bw:14, font:'700 96px "Baloo 2", Arial, sans-serif', dy:6 }); }
+function quizSheet(){
+  let score = 0, n = 0;
+  const ask = () => { const a = 1 + Math.floor(Math.random()*9), b = 1 + Math.floor(Math.random()*9), plus = Math.random() < .7 || a === b, x = plus ? a : Math.max(a, b), y = plus ? b : Math.min(a, b), ans = plus ? x + y : x - y;
+    const opts = new Set([ans]); while (opts.size < 3) opts.add(Math.max(0, ans + Math.floor(Math.random()*7) - 3)); const list = [...opts].sort(() => Math.random() - .5);
+    showSheet(`<div class="eyebrow">Blackboard quiz · ${n + 1} of 5</div><div class="qcard"><p class="big" style="font-size:44px;text-align:center">${x} ${plus ? '+' : '−'} ${y} = ?</p></div><div class="moods">${list.map(v => `<button class="mood" data-v="${v}"><span>${v}</span></button>`).join('')}</div><div class="row"><button class="btn2" id="qzStop">Finish</button></div>`);
+    $('#qzStop').onclick = hideSheet;
+    $('#sheetCard').querySelectorAll('[data-v]').forEach(bt => bt.onclick = () => { n++; if (+bt.dataset.v === ans){ score++; save.xp += 10; sfx.coin(); bt.style.background = 'rgba(90,214,143,.45)'; } else { sfx.miss(); bt.style.background = 'rgba(255,90,90,.4)'; }
+      setTimeout(() => { if (n >= 5){ persist(); updateStats(); showSheet(`<div class="big-done"><h2>${score} out of 5!</h2></div><p style="text-align:center">${score >= 4 ? 'Top of the class! ⭐' : score >= 2 ? 'Nice work. Try again for 5 out of 5!' : 'Good try. Have another go!'}</p><div class="row" style="justify-content:center"><button class="play" id="qzOk">Done</button></div>`); $('#qzOk').onclick = hideSheet; if (score >= 4) buddy().pose = { type:'cheer', until:performance.now()/1000 + 1.5 }; } else ask(); }, 550); }); };
+  ask();
+}
+function buildKingswood(Z){
+  const ox = Z.cx, oz = Z.cz, G = new THREE.Group(), PI = Math.PI; scene.add(G);
+  const ground = mesh(new THREE.CircleGeometry(80, 48), mat('#7cb558', { rough:1, detail:'grass', ao:false }), G, ox, 0, oz, false); ground.rotation.x = -PI/2; ground.receiveShadow = true;
+  const pave = mat('#cfc3ad', { rough:1, detail:'paving', ao:false });
+  box(G, 3.2, .05, 44, pave, ox, 0, oz + 34, { cast:false }); box(G, 30, .05, 3, pave, ox, 0, oz + 16, { cast:false }); box(G, 30, .05, 3, pave, ox, 0, oz - 8, { cast:false }); box(G, 3, .05, 24, pave, ox - 13.5, 0, oz + 4, { cast:false }); box(G, 3, .05, 24, pave, ox + 13.5, 0, oz + 4, { cast:false }); box(G, 14, .05, 2.4, pave, ox + 21, 0, oz + 3, { cast:false });
+  // the main school building with a clock tower, the hall, and the tuck shop
+  bld(G, { x:ox - 8, z:oz - 15, ry:-PI/2, span:8, len:12, floors:2, wall:'UnevenBrick', vines:true }); bld(G, { x:ox + 8, z:oz - 15, ry:-PI/2, span:8, len:12, floors:2, wall:'UnevenBrick', vines:true });
+  bld(G, { x:ox, z:oz - 13, ry:-PI/2, span:4, len:4, floors:4, wall:'UnevenBrick', chimney:false, shutters:false });
+  const clock = mesh(new THREE.CircleGeometry(1.1, 24), new THREE.MeshBasicMaterial({ map:textTexture('🕗', { w:128, h:128, bg:'#fffaf0', fg:'#222', font:'90px Arial', dy:4 }) }), G, ox, 10.4, oz - 10.9, false);
+  bld(G, { x:ox - 30, z:oz + 2, ry:0, span:8, len:12, floors:2, tint:'#fff3c9' });
+  bld(G, { x:ox + 21, z:oz + 36, ry:PI, span:4, len:6, tint:'#ffe9d2', chimney:false });
+  box(G, 3.4, 1.0, .7, '#8b5a34', ox + 18.3, 0, oz + 31, { detail:'wood', ao:false }); box(G, 3.8, .08, 1.6, '#e8443a', ox + 18.3, 2.5, oz + 31.3).rotation.x = .25; for (let i = 0; i < 3; i++) mesh(new THREE.CylinderGeometry(.12, .1, .26, 10), mat(['#ffb02e', '#ff5d9e', '#5ac8ff'][i], { rough:.4 }), G, ox + 17.4 + i*.9, 1.13, oz + 31, false);
+  solidWorld(ox + 18.3, oz + 31, 3.4, .7);
+  spots.push({ x:ox + 18.3, z:oz + 32.2, r:1.8, label:'SNACK', fn(){ if (save.coins < 2){ toast('A pie and a juice cost 2 coins. Find some coins first!'); return; } save.coins -= 2; persist(); updateStats(); sfx.coin(); toast('A pie and a juice. Lekker! 🥧🧃', true); active().pose = { type:'cheer', until:performance.now()/1000 + 1.2 }; buddy().pose = { type:'cheer', until:performance.now()/1000 + 1.2 }; } });
+  // an open classroom you can walk into, with a blackboard quiz
+  const cx = ox + 28, cz = oz - 2;
+  if (kit) kit.room({ x:cx, z:cz, w:8, d:8, south:false, floor:'Floor_WoodLight', tint:'#fff6e6' }); else box(G, 8, .06, 8, '#d9b98a', cx, 0, cz, { cast:false });
+  solidWorld(cx, cz - 4.1, 8.4, .5); solidWorld(cx - 4.1, cz, .5, 8.4); solidWorld(cx + 4.1, cz, .5, 8.4);
+  mesh(new THREE.PlaneGeometry(3.6, 1.8), new THREE.MeshBasicMaterial({ map:chalkTex('7 + 5 = ?') }), G, cx, 1.9, cz - 3.62, false);
+  for (let r = 0; r < 2; r++) for (let c = 0; c < 3; c++){ const dx = cx - 2.4 + c*2.4, dz = cz - .6 + r*2; box(G, 1.1, .06, .6, '#c99a62', dx, .62, dz, { detail:'wood', ao:false }); for (const lx of [-.45, .45]) box(G, .06, .62, .06, '#6b4630', dx + lx, 0, dz, { cast:false }); box(G, .5, .05, .45, '#3d8bff', dx, .38, dz + .55); circles.push({ x:dx, z:dz, r:.55 }); }
+  spots.push({ x:cx, z:cz - 2.4, r:1.7, label:'QUIZ', fn:quizSheet });
+  // the quad: flagpole and the school bell
+  mesh(new THREE.CylinderGeometry(.06, .08, 7, 8), mat('#dddddd', { metal:.6, rough:.3 }), G, ox, 3.5, oz + 4); box(G, 1.5, .9, .04, '#8b1a2b', ox + .8, 5.9, oz + 4, { cast:false }); circles.push({ x:ox, z:oz + 4, r:.3 });
+  box(G, .16, 2.2, .16, '#6b4630', ox - 5, 0, oz + 12); box(G, .9, .14, .16, '#6b4630', ox - 4.6, 2.2, oz + 12); const bell = mesh(new THREE.CylinderGeometry(.14, .3, .4, 12), mat('#d9a62e', { metal:.8, rough:.25 }), G, ox - 4.3, 1.85, oz + 12); circles.push({ x:ox - 5, z:oz + 12, r:.3 });
+  spots.push({ x:ox - 4.5, z:oz + 12.6, r:1.6, label:'RING', fn(){ tone(1320, .5, 'sine', .14); tone(1760, .4, 'sine', .07, .02); zoneLife.bellT = 1; zoneLife.bell = bell; for (const n of npcs) if (n.roam){ n.pose = { type:'cheer', until:performance.now()/1000 + 1.4 }; n.vy = 3.5; } } });
+  // swimming pool, playground and a little field
+  const px = ox - 27, pz = oz + 30; box(G, 12, .3, 20, '#e9e4d8', px, 0, pz, { cast:false }); const water = mesh(new THREE.PlaneGeometry(10.4, 18.4), new THREE.MeshStandardMaterial({ color:'#3aa6d8', roughness:.06, metalness:.3, transparent:true, opacity:.9 }), G, px, .32, pz, false); water.rotation.x = -PI/2;
+  for (let i = 1; i < 4; i++) box(G, .08, .06, 18, i % 2 ? '#e8443a' : '#ffffff', px - 5.2 + i*2.6, .31, pz, { cast:false }); solidWorld(px, pz, 12, 20);
+  const sx = ox - 9, sz = oz + 36; box(G, .12, 2.4, .12, '#e8443a', sx - 1.2, 0, sz); box(G, .12, 2.4, .12, '#e8443a', sx + 1.2, 0, sz); box(G, 2.6, .12, .12, '#e8443a', sx, 2.4, sz); for (const o2 of [-.6, .6]){ box(G, .03, 1.7, .03, '#cccccc', sx + o2 - .2, .6, sz, { cast:false }); box(G, .03, 1.7, .03, '#cccccc', sx + o2 + .2, .6, sz, { cast:false }); box(G, .5, .05, .25, '#ffd25a', sx + o2, .58, sz); }
+  const sl = box(G, .9, .08, 3.6, '#5ac8ff', sx + 5, 1.0, sz + 1); sl.rotation.x = .5; box(G, 1, 2, 1, '#ffb02e', sx + 5, 0, sz - 1); circles.push({ x:sx + 5, z:sz - 1, r:.8 }, { x:sx - 1.2, z:sz, r:.2 }, { x:sx + 1.2, z:sz, r:.2 });
+  const fx = ox + 34, fz = oz - 30; box(G, 22, .03, 30, '#6fae4a', fx, .01, fz, { cast:false, detail:'grass', ao:false }); for (const zz of [-14, 14]){ for (const xx of [-1.4, 1.4]) mesh(new THREE.CylinderGeometry(.07, .07, 6, 8), mat('#ffffff'), G, fx + xx, 3, fz + zz); box(G, 2.9, .1, .1, '#ffffff', fx, 2.4, fz + zz); circles.push({ x:fx - 1.4, z:fz + zz, r:.2 }, { x:fx + 1.4, z:fz + zz, r:.2 }); } for (const zz of [-14, 0, 14]) box(G, 22, .02, .12, '#ffffff', fx, .03, fz + zz, { cast:false });
+  // lost house badges to find
+  [[-22, -30], [38, 10], [-40, 18], [10, 44], [30, -6], [-16, 22]].forEach(([dx, dz], i) => { const m = mesh(new THREE.CylinderGeometry(.16, .16, .04, 6), mat('#ffd35a', { metal:.7, rough:.25 }), G, ox + dx, .3, oz + dz, false); m.rotation.x = PI/2; addFind('kingswood', i, ox + dx, oz + dz, G, 'House badge', '🛡️', 6); });
+  // pupils on break
+  for (let i = 0; i < 4; i++){ const roam = () => [ox - 11 + Math.random()*22, oz - 4 + Math.random()*18]; const n = npc(true, {}, roam(), roam(), 1.8 + Math.random()*1.4); n.roam = roam; n.lines = ['Break time is the best time!', 'Have you rung the bell yet?', 'Mrs Naidoo says 7 plus 5 is 12.', 'Race you to the tuck shop!', 'The pool is freezing today!']; }
+  if (kit) kit.flush(() => G);
+  addPortal('kingswood', ox, oz + 60, 0, 'Back to town', 'town', PLACES.kwgate.pos[0], PLACES.kwgate.pos[1] + 3.2, 0);
+  Z.plant = () => { if (Z.planted) return; Z.planted = true; const put = flora.put, rnd = flora.rnd, tree = (name, x, z, sc) => { put('near', name, x, z, sc); fcell(x, z).trees.push(['green', x, z, 1.2]); circles.push({ x, z, r:.55 }); };
+    for (let i = 0; i < 40; i++){ const a = i/40*6.28, r = 66 + rnd()*8; tree(i % 4 ? 'CommonTree_5' : 'Pine_2', ox + Math.cos(a)*r, oz + Math.sin(a)*r, 1.3 + rnd()*.3); }
+    for (const [dx, dz] of [[-9, 4], [9, 4], [-9, 12], [9, 12], [-20, 14], [20, 14], [-38, -20], [14, 26]]) tree('CommonTree_1', ox + dx, oz + dz, 1.1);
+    for (const sx2 of [-1, 1]) for (let i = 0; i < 4; i++) tree('CommonTree_2_jac', ox + sx2*5, oz + 26 + i*8, 1);
+    for (let i = 0; i < 90; i++){ const a = rnd()*6.28, r = Math.sqrt(rnd())*60, x = ox + Math.cos(a)*r, z = oz + Math.sin(a)*r; if (!blocked(x, z, .6)) put('detail', rnd() < .6 ? 'Grass_Common_Short' : (rnd() < .5 ? 'Flower_3_Group' : 'Bush_Common'), x, z, .35 + rnd()*.2); }
+    flora.flush(); };
+  if (flora.ready) Z.plant();
 }
 function makeFrog(parent, x, z){
   const g = new THREE.Group(); g.position.set(x, .1, z); parent.add(g); const gm = mat('#6fbf4a', { rough:.5 });
@@ -2486,18 +2562,22 @@ function plantGardens(Z){
   flora.flush();
 }
 function updateZoneLife(dt, t, zn){
-  if (zn !== 'gardens' || !ZONES.gardens.built) return; const Z = ZONES.gardens, p = active().pos;
+  const p = active().pos;
+  for (const d of zoneLife.finds){ if (d.found || d.zid !== zn) continue; d.halo.material.opacity = .2 + Math.sin(t*4 + d.i)*.1; if (Math.hypot(p.x - d.x, p.z - d.z) < 1.5 && state.mode === 'play'){ d.found = true; d.halo.material.opacity = 0; save.finds = save.finds || {}; (save.finds[zn] = save.finds[zn] || []).push(d.i); save.xp += 20; const n = save.finds[zn].length; sparkle(d.x, .6, d.z); sfx.coin(); buzz(15);
+      if (n >= d.total){ save.xp += 100; const stk = awardSticker(); toast(`All ${n} found! ${stk ? 'New sticker: ' + stk[0] : '+100 XP'}`, true); sfx.win(); } else toast(`${d.what} ${n} of ${d.total}! ${d.emoji}`, true); persist(); updateStats(); } }
+  if (zn !== 'gardens' || !ZONES.gardens.built) return; const Z = ZONES.gardens;
   for (const b of zoneLife.bfs){ const q = b.g.position, dx = b.tx - q.x, dz = b.tz - q.z, d = Math.hypot(dx, dz); if (d < .5){ b.tx = Z.cx + (Math.random() - .5)*90; b.tz = Z.cz + (Math.random() - .5)*90; b.ty = .8 + Math.random()*1.8; } else { q.x += dx/d*1.4*dt; q.z += dz/d*1.4*dt; q.y += (b.ty - q.y)*dt + Math.sin(t*6 + b.ph)*.01; b.g.rotation.y = Math.atan2(dx, dz); } const f = Math.sin(t*17 + b.ph)*.9; b.wl.rotation.y = -f; b.wr.rotation.y = f; }
   for (const f of zoneLife.frogs){ f.t -= dt; if (f.t <= 0){ f.t = 2 + Math.random()*5; f.hop = .5; f.g.rotation.y = Math.random()*6.28; if (Math.hypot(p.x - f.x, p.z - f.z) < 14) tone(180 + Math.random()*40, .09, 'square', .03); } if (f.hop > 0){ f.hop -= dt; f.g.position.y = .1 + Math.sin(clamp(f.hop/.5, 0, 1)*Math.PI)*.35; } }
   if (zoneLife.ring) zoneLife.ring.material.opacity = .28 + Math.sin(t*2)*.12;
-  for (const d of zoneLife.doors){ if (d.found) continue; d.halo.material.opacity = .2 + Math.sin(t*4 + d.i)*.1; if (Math.hypot(p.x - d.x, p.z - d.z) < 1.5 && state.mode === 'play'){ d.found = true; d.halo.material.opacity = 0; save.finds = save.finds || {}; (save.finds.gardens = save.finds.gardens || []).push(d.i); save.xp += 20; const n = save.finds.gardens.length; sparkle(d.x, .6, d.z); sfx.coin(); buzz(15);
-      if (n >= zoneLife.doors.length){ save.xp += 100; const stk = awardSticker(); toast(`All ${n} fairy doors found! ${stk ? 'New sticker: ' + stk[0] : '+100 XP'}`, true); sfx.win(); } else toast(`Fairy door ${n} of ${zoneLife.doors.length}! 🧚`, true); persist(); updateStats(); } }
 }
 function goPlace(k){
   if (state.mode !== 'play'){ if (ms) beginPlay(); else startFreeExplore(); }
   if (k === 'gardens'){ travel('gardens', ZONES.gardens.cx, ZONES.gardens.cz + 49, Math.PI); return; }
+  if (k === 'kingswood'){ travel('kingswood', ZONES.kingswood.cx, ZONES.kingswood.cz + 55, Math.PI); return; }
   const pl = PLACES[k]; const [x, z] = freeSpot(pl.pos[0] + 1.5, pl.pos[1] + pl.r*.6); travel(zoneAt({ x, z }), x, z, Math.atan2(pl.pos[0] - x, pl.pos[1] - z), true); toast(pl.name, true);
 }
+{ for (const c of [[112, -50], [104, -52], [120, -52], [112, -44], [98, -48], [124, -46]]) if (!blocked(c[0], c[1], 5)){ PLACES.kwgate.pos = c; PLACES.kwgate.itemAt = [c[0] + 2, c[1] + 2]; break; }
+  const [kx, kz] = PLACES.kwgate.pos; addPortal('town', kx, kz, 0, 'Kingswood College', 'kingswood', ZONES.kingswood.cx, ZONES.kingswood.cz + 55, Math.PI); }
 { for (const c of [[-99, 44], [-102, 34], [-102, 54], [-96, 60], [-106, 44], [-96, 26], [-88, 64]]) if (!blocked(c[0], c[1], 6)){ PLACES.botgate.pos = c; PLACES.botgate.itemAt = [c[0] + 2, c[1] + 2]; break; }
   const [gx, gz] = PLACES.botgate.pos; addPortal('town', gx, gz, Math.PI/2, 'Botanical Gardens', 'gardens', ZONES.gardens.cx, ZONES.gardens.cz + 49, Math.PI);
   box(world, 9, .05, 2.6, '#d9c39a', gx + 5.5, .01, gz, { cast:false, detail:'paving', ao:false }); }
