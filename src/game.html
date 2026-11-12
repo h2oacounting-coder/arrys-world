@@ -145,6 +145,10 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
 #menuPanel>*{animation:rise .28s ease both}
 @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){#menuPanel>*{animation:none}}
+#fade{position:fixed;inset:0;z-index:18;background:#1b1420;opacity:0;pointer-events:none;transition:opacity .3s ease}
+#fade.on{opacity:1}
+.chips.go{display:flex;flex-wrap:wrap;gap:8px}
+.chips.go .chip{padding:11px 14px;font-size:14px}
 .countdown{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 2px}
 .countdown span{padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.1);font:700 13px/1.2 var(--body)}
 .countdown b{color:var(--gold)}
@@ -346,6 +350,7 @@ details.settings summary{cursor:pointer;font:800 12px/1 var(--body);letter-spaci
 </div>
 
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<div id="fade"></div>
 <div id="rotate" role="alert"><div><span>📱</span>Turn your phone sideways to play</div></div>
 <script type="module">
 import * as THREE from 'three';
@@ -626,6 +631,9 @@ function signPlane(parent, text, w, h, x, y, z, o = {}){
 const colliders = [];   // axis-aligned boxes
 const circles = [];     // round obstacles
 const WCX = 5, WCZ = -55, BOUND = 166;
+// Places beyond the town are their own little maps, far away on the same grid and reached through a gate
+const ZONES = { town:{ name:'Makhanda', cx:WCX, cz:WCZ, r:BOUND }, gardens:{ name:'Botanical Gardens', cx:3000, cz:0, r:58 } };
+function zoneAt(p){ let best = 'town', bd = 1e12; for (const [k, z] of Object.entries(ZONES)){ const d = Math.hypot(p.x - z.cx, p.z - z.cz); if (d < bd){ bd = d; best = k; } } return best; }
 function solidWorld(cx, cz, w, d){ colliders.push({ x0:cx-w/2, x1:cx+w/2, z0:cz-d/2, z1:cz+d/2 }); }
 function toWorld(g, lx, lz){ const c = Math.cos(g.rotation.y), s = Math.sin(g.rotation.y); return [g.position.x + lx*c + lz*s, g.position.z - lx*s + lz*c]; }
 function solidLocal(g, lx, lz, w, d){ const [x, z] = toWorld(g, lx, lz); const swap = Math.abs(Math.sin(g.rotation.y)) > .5; solidWorld(x, z, swap ? d : w, swap ? w : d); }
@@ -647,8 +655,8 @@ function resolve(p, r){
     const dx = p.x - c.x, dz = p.z - c.z, rr = r + c.r, d2 = dx*dx + dz*dz;
     if (d2 < rr*rr && d2 > 1e-8){ const d = Math.sqrt(d2); p.x = c.x + dx/d*rr; p.z = c.z + dz/d*rr; hit = true; }
   }
-  const bx = p.x - WCX, bz = p.z - WCZ, bd = Math.hypot(bx, bz);
-  if (bd > BOUND){ p.x = WCX + bx/bd*BOUND; p.z = WCZ + bz/bd*BOUND; hit = true; }
+  const Z = p.x > 1500 ? ZONES[zoneAt(p)] : ZONES.town, bx = p.x - Z.cx, bz = p.z - Z.cz, bd = Math.hypot(bx, bz);
+  if (bd > Z.r){ p.x = Z.cx + bx/bd*Z.r; p.z = Z.cz + bz/bd*Z.r; hit = true; }
   return hit;
 }
 function blocked(x, z, pad){
@@ -789,6 +797,10 @@ const PLACES = {
   cathedral: { name:'The Cathedral',    pos:[0, -133],   r:7,   itemAt:[-6, -137]},
   park:      { name:'Jacaranda Park',   pos:[-70, 41],   r:6,   itemAt:[-74, 44] },
   garden:    { name:'Back Garden',      pos:[12, 53],    r:4.5, itemAt:[10, 55] },
+  botgate:   { name:'Gardens Gate',     pos:[-99, 44],   r:4,   itemAt:[-97, 46] },
+  pond:      { name:'Lily Pond',        pos:[2992, 6],   r:4,   itemAt:[2994, 8] },
+  fairy:     { name:'Fairy Ring',       pos:[2976, 14],  r:3.5, itemAt:[2977, 15] },
+  gazebo:    { name:'The Bandstand',    pos:[3020, -18], r:4,   itemAt:[3021, -16] },
   field:     { name:'Kingswood Field',  pos:[66, -70],   r:6,   itemAt:[64, -72] },
   grocer:    { name:"Graham's Grocer", pos:[3.2, -61],   r:4,   itemAt:[5.2, -61] },
 };
@@ -2152,6 +2164,11 @@ const MISSIONS = [
     { t:'mini', game:'stack', label:'Stack a milkshake 8 scoops high' },
     { t:'pickup', item:'milkshake', name:'Milkshakes', label:'Collect the milkshakes', atPlace:'goat' },
     { t:'goto', place:'park', label:'Find a bench in Jacaranda Park' } ] },
+  { id:'gardens', title:'A Walk in the Botanical Gardens', blurb:'Go through the gate past Jacaranda Park and explore: the lily pond, the fairy ring and the bandstand.', steps:[
+    { t:'goto', place:'botgate', label:'Find the Gardens gate past the park' },
+    { t:'goto', place:'pond', label:'Find the lily pond' },
+    { t:'goto', place:'fairy', label:'Find the fairy ring' },
+    { t:'goto', place:'gazebo', label:'Finish at the bandstand' } ] },
   { id:'butterflies', title:'Butterfly Hunt', blurb:'The park is full of butterflies. Grab the net and see how many you can catch!', steps:[
     { t:'goto', place:'park', label:'Walk to Jacaranda Park' },
     { t:'mini', game:'butterflies', label:'Catch 12 butterflies' } ] },
@@ -2315,7 +2332,7 @@ async function loadFlora(){
   try {
     const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js'); const L = new GLTFLoader().setPath('assets/nature/');
     const names = ['CommonTree_1', 'CommonTree_2', 'CommonTree_3', 'CommonTree_5', 'CommonTree_1_jac', 'CommonTree_2_jac', 'TwistedTree_1_jac', 'Pine_1', 'Pine_2', 'Bush_Common', 'Bush_Common_Flowers', 'Flower_3_Group', 'Flower_4_Group', 'Grass_Common_Short', 'Grass_Wispy_Tall', 'Rock_Medium_1', 'Rock_Medium_2', 'Rock_Medium_3', 'Fern_1', 'Plant_7_Big', 'Mushroom_Common', 'Pebble_Round_1', 'Pebble_Round_3'];
-    const G = {}; await Promise.all(names.map(n => L.loadAsync(n + '.gltf').then(g => { g.scene.updateMatrixWorld(true); G[n] = g.scene; })));
+    const G = flora.G = {}; await Promise.all(names.map(n => L.loadAsync(n + '.gltf').then(g => { g.scene.updateMatrixWorld(true); G[n] = g.scene; })));
     const rnd = (() => { let a = 12345; return () => (a = (a*1664525 + 1013904223) >>> 0) / 4294967296; })();
     const put = (kind, name, x, z, sc, y = 0) => { const c = fcell(x, z); (c[kind][name] = c[kind][name] || []).push([x, y, z, sc, rnd()*6.28]); };
     // trees: swap each simple tree for a model
@@ -2328,14 +2345,14 @@ async function loadFlora(){
     const ok = (x, z, r = 1) => !roadClear(x, z) && !blocked(x, z, r) && Math.hypot(x - OVAL.x, z - OVAL.z) > OVAL.r + 2 && !(x > 50 && x < 90 && z < -64 && z > -114);
     for (let i = 0; i < 850; i++){ const a = rnd()*6.28, r = Math.sqrt(rnd())*165, x = WCX + Math.cos(a)*r, z = WCZ + Math.sin(a)*r; if (!ok(x, z, .6)) continue; const k = rnd();
       if (k < .62) put('detail', rnd() < .7 ? 'Grass_Common_Short' : 'Grass_Wispy_Tall', x, z, .55 + rnd()*.4);
-      else if (k < .8) put('detail', rnd() < .5 ? 'Flower_3_Group' : 'Flower_4_Group', x, z, .5 + rnd()*.3);
+      else if (k < .8) put('detail', rnd() < .5 ? 'Flower_3_Group' : 'Flower_4_Group', x, z, .3 + rnd()*.16);
       else if (k < .88) put('detail', rnd() < .5 ? 'Fern_1' : 'Plant_7_Big', x, z, .5 + rnd()*.4);
       else if (k < .95) put('detail', rnd() < .5 ? 'Pebble_Round_1' : 'Pebble_Round_3', x, z, .8 + rnd()*.8);
       else put('detail', 'Mushroom_Common', x, z, .6 + rnd()*.4); }
     for (let i = 0; i < 110; i++){ const a = rnd()*6.28, r = Math.sqrt(rnd())*165, x = WCX + Math.cos(a)*r, z = WCZ + Math.sin(a)*r; if (!ok(x, z, 2.6)) continue; if (rnd() < .3){ const sc = .35 + rnd()*.35; put('near', 'Rock_Medium_' + (1 + Math.floor(rnd()*3)), x, z, sc); circles.push({ x, z, r:1.3*sc }); } else { const sc = .8 + rnd()*.5; put('near', rnd() < .45 ? 'Bush_Common_Flowers' : 'Bush_Common', x, z, sc); circles.push({ x, z, r:.7*sc }); } }
     // the park and Dad's garden get extra flowers
-    for (let i = 0; i < 90; i++){ const x = -70 + (rnd() - .5)*56, z = 45 + (rnd() - .5)*30; if (ok(x, z, .6)) put('detail', rnd() < .5 ? 'Flower_3_Group' : 'Flower_4_Group', x, z, .55 + rnd()*.3); }
-    for (let i = 0; i < 26; i++){ const x = 1 + rnd()*22, z = 50 + rnd()*14; if (ok(x, z, .8)) put('detail', rnd() < .6 ? 'Grass_Common_Short' : 'Flower_4_Group', x, z, .5 + rnd()*.25); }
+    for (let i = 0; i < 90; i++){ const x = -70 + (rnd() - .5)*56, z = 45 + (rnd() - .5)*30; if (ok(x, z, .6)) put('detail', rnd() < .5 ? 'Flower_3_Group' : 'Flower_4_Group', x, z, .32 + rnd()*.16); }
+    for (let i = 0; i < 26; i++){ const x = 1 + rnd()*22, z = 50 + rnd()*14; if (ok(x, z, .8)) put('detail', rnd() < .6 ? 'Grass_Common_Short' : 'Flower_4_Group', x, z, .34 + rnd()*.14); }
     const P = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), pv = new THREE.Vector3(), sv = new THREE.Vector3(), col = new THREE.Color(), seen = new Set();
     const build = (group, name, list, cast) => {
       G[name].traverse(o => { if (!o.isMesh) return; const m = o.material;
@@ -2345,7 +2362,8 @@ async function loadFlora(){
         im.castShadow = cast; im.receiveShadow = true; im.computeBoundingSphere(); group.add(im); });
     };
     const greens = ['#4f7f36', '#5e8c3c', '#46733a', '#6b9440'], jacs = ['#b79be8', '#c3a8f0', '#a98ade'], cyp = ['#355f3a', '#2f5434'];
-    for (const c of fcells.values()){
+    flora.put = put; flora.rnd = rnd;
+    flora.flush = () => { for (const c of fcells.values()){ if (c.built) continue; c.built = true;
       for (const [n, list] of Object.entries(c.near)) build(c.gNear, n, list, true);
       for (const [n, list] of Object.entries(c.detail)) build(c.gDetail, n, list, false);
       if (c.trees.length){ // far stand-ins: the old simple trees, one small batch per block
@@ -2355,10 +2373,10 @@ async function loadFlora(){
         tr.computeBoundingSphere(); cr.computeBoundingSphere(); c.gFar.add(tr, cr);
       }
       c.gNear.visible = c.gDetail.visible = false; scene.add(c.gNear, c.gDetail, c.gFar);
-    }
+    } }; flora.flush();
     // retire the old town trees (hill trees stay)
     const zero = new THREE.Matrix4().makeScale(0, 0, 0); for (let i = 0; i < townTrees.all.length; i++) townTrees.trunks.setMatrixAt(i, zero); townTrees.trunks.instanceMatrix.needsUpdate = true; townTrees.crowns.visible = false;
-    flora.ready = true;
+    flora.ready = true; for (const k of Object.keys(ZONES)) if (ZONES[k].built) ZONES[k].plant?.();
   } catch(e){ console.warn('Models not loaded, keeping simple trees:', e && e.message); }
 }
 function updateFlora(dt, t){
@@ -2366,6 +2384,113 @@ function updateFlora(dt, t){
   const rn = quality === 'low' ? 52 : quality === 'medium' ? 72 : 92, rd = quality === 'low' ? 26 : quality === 'medium' ? 36 : 46, cx = camera.position.x, cz = camera.position.z;
   for (const c of fcells.values()){ const d = Math.hypot(c.cx - cx, c.cz - cz); c.gNear.visible = d < rn; c.gFar.visible = !c.gNear.visible; c.gDetail.visible = d < rd; }
 }
+
+
+/* =========================================================
+   Gates and places beyond the town
+   ========================================================= */
+const portals = []; let portalCool = 0;
+function addPortal(zone, x, z, face, label, toZone, tx, tz, tface){
+  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = face; scene.add(g);
+  for (const sx of [-1, 1]){ box(g, .6, 3.3, .6, '#b9b2a4', sx*1.5, 0, 0, { detail:'stone' }); mesh(new THREE.SphereGeometry(.28, 12, 8), mat('#ffd35a', { rough:.3, metal:.5 }), g, sx*1.5, 3.55, 0); }
+  const arch = mesh(new THREE.TorusGeometry(1.5, .16, 8, 20, Math.PI), mat('#3d6b45', { rough:.5, metal:.3 }), g, 0, 3.2, 0);
+  const sign = mesh(new THREE.PlaneGeometry(2.9, .62), new THREE.MeshBasicMaterial({ map:textTexture(label, { w:512, h:110, bg:'#2f5b45', fg:'#fff4d0', border:'#ffd35a', bw:5, font:'800 52px "Baloo 2", Arial, sans-serif', dy:2 }), side:THREE.DoubleSide }), g, 0, 2.75, .02, false);
+  const back = sign.clone(); back.rotation.y = Math.PI; back.position.z = -.02; g.add(back);
+  const glow = mesh(new THREE.PlaneGeometry(2.4, 2.4), new THREE.MeshBasicMaterial({ color:'#fff2b0', transparent:true, opacity:.28, depthWrite:false, side:THREE.DoubleSide, blending:THREE.AdditiveBlending }), g, 0, 1.25, 0, false);
+  for (const sx of [-1, 1]) circles.push({ x:x + Math.cos(face)*sx*1.5, z:z - Math.sin(face)*sx*1.5, r:.42 });
+  portals.push({ zone, x, z, toZone, tx, tz, tface, glow, label });
+}
+function travel(zid, x, z, face, quiet){
+  const fade = $('#fade'); fade.classList.add('on'); portalCool = 2;
+  setTimeout(() => {
+    buildZone(zid); if (state.inCar) exitCar(true);
+    const a = active(), b = buddy(), sx = Math.cos(face), sz = -Math.sin(face);
+    a.place(x, z, face); b.place(x + sx*1.1, z + sz*1.1, face); dog.place(x - sx*1.1, z - sz*1.1, face); dog.mode = 'follow'; resolve(b.pos, .4); resolve(dog.pos, .4);
+    cam.yaw = face + Math.PI; cam.snap = true; trail.dots.count = 0; trail.path = null;
+    if (!quiet) toast(ZONES[zid].name, true); sfx.step(); fade.classList.remove('on');
+  }, 330);
+}
+function updatePortals(dt, t){
+  portalCool = Math.max(0, portalCool - dt);
+  const p = active().pos, zn = zoneAt(p);
+  for (const o of portals){ o.glow.material.opacity = .22 + Math.sin(t*3)*.08; if (o.zone !== zn || portalCool > 0 || state.mode !== 'play') continue;
+    const d = Math.hypot(p.x - o.x, p.z - o.z); if (d < 1.25 && !state.inCar) travel(o.toZone, o.tx, o.tz, o.tface); else if (d < 4 && state.inCar && !o.told){ o.told = true; toast('Hop out of the bakkie to walk through the gate'); } }
+  updateZoneLife(dt, t, zn);
+}
+const zoneLife = { bfs:[], frogs:[], doors:[] };
+function buildZone(zid){
+  const Z = ZONES[zid]; if (!Z || zid === 'town' || Z.built) return; Z.built = true;
+  if (zid === 'gardens') buildGardens(Z);
+}
+function buildGardens(Z){
+  const ox = Z.cx, oz = Z.cz, G = new THREE.Group(); scene.add(G);
+  const ground = mesh(new THREE.CircleGeometry(74, 48), mat('#79b356', { rough:1, detail:'grass', ao:false }), G, ox, 0, oz, false); ground.rotation.x = -Math.PI/2; ground.receiveShadow = true;
+  const pathM = mat('#d9c39a', { rough:1, detail:'paving', ao:false });
+  box(G, 3, .05, 46, pathM, ox, 0, oz + 31, { cast:false }); const loop = mesh(new THREE.RingGeometry(11.2, 13.6, 48), pathM, G, ox - 8, .05, oz - 6, false); loop.rotation.x = -Math.PI/2; loop.receiveShadow = true;
+  const p2 = box(G, 2.4, .05, 24, pathM, ox + 12, 0, oz - 13, { cast:false }); p2.rotation.y = -1.05; const p3 = box(G, 2.2, .05, 16, pathM, ox - 19, 0, oz + 8, { cast:false }); p3.rotation.y = .9;
+  // lily pond
+  const px = ox - 8, pz = oz - 6;
+  const water = mesh(new THREE.CircleGeometry(9, 40), new THREE.MeshStandardMaterial({ color:'#3f8fa8', roughness:.06, metalness:.35, transparent:true, opacity:.88 }), G, px, .06, pz, false); water.rotation.x = -Math.PI/2;
+  mesh(new THREE.TorusGeometry(9.1, .28, 6, 44), mat('#8d8a80', { rough:.9, flat:true }), G, px, .05, pz, false).rotation.x = Math.PI/2; circles.push({ x:px, z:pz, r:8.9 });
+  for (let i = 0; i < 16; i++){ const a = i*2.4, r = 1.5 + (i*37 % 60)/10, lx = px + Math.cos(a)*r, lz = pz + Math.sin(a)*r; const pad = mesh(new THREE.CircleGeometry(.45 + (i % 3)*.12, 14, 0, 5.6), mat('#4f9a4a', { rough:.7 }), G, lx, .09, lz, false); pad.rotation.x = -Math.PI/2; pad.rotation.z = a; if (i % 3 === 0) mesh(new THREE.SphereGeometry(.14, 8, 6), mat(i % 2 ? '#ff9ac4' : '#ffffff', { rough:.5 }), G, lx, .16, lz, false).scale.y = .6; if (i % 5 === 1) zoneLife.frogs.push(makeFrog(G, lx, lz)); }
+  // bandstand
+  const bx = ox + 20, bz = oz - 18; mesh(new THREE.CylinderGeometry(3.4, 3.6, .1, 8), mat('#f1ece2', { rough:.8 }), G, bx, .05, bz);
+  for (let i = 0; i < 8; i++){ const a = i/8*Math.PI*2 + .39; box(G, .16, 2.9, .16, '#ffffff', bx + Math.cos(a)*3.1, 0, bz + Math.sin(a)*3.1); if (i !== 2) { const r = box(G, 2.4, .08, .08, '#ffffff', bx + Math.cos(a + .39)*2.87, .9, bz + Math.sin(a + .39)*2.87, { cast:false }); r.rotation.y = -(a + .39) + Math.PI/2; } }
+  mesh(new THREE.ConeGeometry(4.1, 1.7, 8), mat('#d8554a', { rough:.6, detail:'roof' }), G, bx, 3.75, bz).rotation.y = .39; mesh(new THREE.SphereGeometry(.22, 10, 8), mat('#ffd35a', { metal:.5, rough:.3 }), G, bx, 4.7, bz);
+  // fairy ring glow
+  const fr = mesh(new THREE.RingGeometry(1.9, 2.5, 32), new THREE.MeshBasicMaterial({ color:'#ffe9a0', transparent:true, opacity:.35, depthWrite:false, blending:THREE.AdditiveBlending }), G, ox - 24, .07, oz + 14, false); fr.rotation.x = -Math.PI/2; zoneLife.ring = fr;
+  // aloe rockery
+  for (let i = 0; i < 9; i++) aloe(G, ox + 21 + Math.cos(i*2.1)*(2 + i*.5), oz + 17 + Math.sin(i*2.1)*(2 + i*.45), .9 + (i % 3)*.25);
+  // fairy doors to find
+  const spots = [[-30, -22], [26, -34], [38, 6], [-38, 24], [8, 22], [-14, -38]]; const found = (save.finds || {}).gardens || [];
+  spots.forEach(([dx, dz], i) => { const d = new THREE.Group(); d.position.set(ox + dx, 0, oz + dz + .55); G.add(d);
+    box(d, .42, .6, .06, ['#e8443a', '#3d8bff', '#ffb02e', '#9a6be0', '#5ac06a', '#ff5d9e'][i], 0, 0, 0, { cast:false }); mesh(new THREE.CylinderGeometry(.21, .21, .06, 12, 1, false, 0, Math.PI), mat('#f4efe6'), d, 0, .6, 0, false).rotation.x = Math.PI/2;
+    mesh(new THREE.SphereGeometry(.035, 6, 5), mat('#ffd35a', { metal:.6, rough:.3 }), d, .12, .3, .05, false);
+    const halo = mesh(new THREE.SphereGeometry(.5, 10, 8), new THREE.MeshBasicMaterial({ color:'#fff2b0', transparent:true, opacity:found.includes(i) ? 0 : .22, depthWrite:false, blending:THREE.AdditiveBlending }), d, 0, .35, .1, false);
+    zoneLife.doors.push({ i, x:ox + dx, z:oz + dz + .9, halo, found:found.includes(i) }); });
+  // butterflies drifting about
+  for (let i = 0; i < 9; i++){ const g = new THREE.Group(), wm = new THREE.MeshStandardMaterial({ color:pick(['#ff7ab0', '#7ad0ff', '#ff9a3a', '#b48aff', '#ffd23a']), side:THREE.DoubleSide, roughness:.6 }), wg = new THREE.PlaneGeometry(.26, .32); wg.translate(.13, 0, 0);
+    const wl = new THREE.Mesh(wg, wm), wr = new THREE.Mesh(wg, wm); wr.scale.x = -1; wl.rotation.x = wr.rotation.x = -Math.PI/2; g.add(wl, wr); g.position.set(ox + (Math.random() - .5)*60, 1.2, oz + (Math.random() - .5)*60); G.add(g); zoneLife.bfs.push({ g, wl, wr, ph:Math.random()*6, tx:g.position.x, tz:g.position.z, ty:1.2 }); }
+  addPortal('gardens', ox, oz + 54, 0, 'Back to town', 'town', PLACES.botgate.pos[0] + 3.2, PLACES.botgate.pos[1], Math.PI/2);
+  Z.treeSpots = spots.map(([dx, dz]) => [ox + dx, oz + dz]);
+  Z.plant = () => plantGardens(Z); if (flora.ready) Z.plant(); else plantGardensSimple(Z, G);
+}
+function makeFrog(parent, x, z){
+  const g = new THREE.Group(); g.position.set(x, .1, z); parent.add(g); const gm = mat('#6fbf4a', { rough:.5 });
+  mesh(new THREE.SphereGeometry(.16, 12, 8), gm, g, 0, .1, 0).scale.set(1, .7, 1.2); for (const sx of [-1, 1]){ mesh(new THREE.SphereGeometry(.055, 8, 6), gm, g, sx*.08, .2, .1, false); mesh(new THREE.SphereGeometry(.028, 6, 5), mat('#111111'), g, sx*.08, .22, .14, false); mesh(new THREE.SphereGeometry(.07, 8, 6), gm, g, sx*.15, .04, -.08, false).scale.set(1, .6, 1.4); }
+  return { g, x, z, t:1 + Math.random()*4, hop:0 };
+}
+function plantGardensSimple(Z, G){ for (let i = 0; i < 46; i++){ const a = i/46*6.28, r = 60 + (i % 3)*3; bush(G, Z.cx + Math.cos(a)*r, Z.cz + Math.sin(a)*r, 2.4, '#46733a'); } }
+function plantGardens(Z){
+  if (Z.planted) return; Z.planted = true; const ox = Z.cx, oz = Z.cz, put = flora.put, rnd = flora.rnd, tree = (type, name, x, z, sc, sz) => { put('near', name, x, z, sc); fcell(x, z).trees.push([type, x, z, sz]); circles.push({ x, z, r:.5*sz }); };
+  const clear = (x, z) => Math.hypot(x - (ox - 8), z - (oz + -6)) > 15 && Math.abs(x - ox) > 3.5 || (z < oz + 6 && Math.hypot(x - (ox - 8), z - (oz - 6)) > 15);
+  for (let i = 0; i < 46; i++){ const a = i/46*6.28 + rnd()*.05, r = 60 + rnd()*8; tree(i % 5 === 0 ? 'cypress' : 'green', i % 5 === 0 ? 'Pine_2' : 'CommonTree_5', ox + Math.cos(a)*r, oz + Math.sin(a)*r, 1.25 + rnd()*.4, 1.3); }
+  for (const sx of [-1, 1]) for (let i = 0; i < 5; i++) tree('jac', 'TwistedTree_1_jac', ox + sx*6.5, oz + 50 - i*8.5, .5, 1.3);   // jacaranda avenue from the gate
+  for (const [x, z] of Z.treeSpots) tree('green', 'CommonTree_1', x, z, 1.35, 1.3);
+  for (let i = 0; i < 16; i++){ const a = rnd()*6.28, r = 20 + rnd()*34, x = ox + Math.cos(a)*r, z = oz + Math.sin(a)*r; if (clear(x, z) && !blocked(x, z, 3)) tree(rnd() < .3 ? 'jac' : 'green', rnd() < .3 ? 'CommonTree_2_jac' : 'CommonTree_2', x, z, 1 + rnd()*.4, 1.1); }
+  for (let i = 0; i < 12; i++){ const a = i/12*6.28; put('detail', 'Mushroom_Common', ox - 24 + Math.cos(a)*2.2, oz + 14 + Math.sin(a)*2.2, .7 + rnd()*.3); }
+  for (const [mx, mz, n] of [[ox + 20, oz + 30, 46], [ox - 30, oz - 8, 40], [ox + 6, oz - 34, 40], [ox - 22, oz + 34, 34]]) for (let i = 0; i < n; i++){ const a = rnd()*6.28, r = Math.sqrt(rnd())*9, x = mx + Math.cos(a)*r, z = mz + Math.sin(a)*r; if (!blocked(x, z, .5)) put('detail', rnd() < .5 ? 'Flower_3_Group' : (rnd() < .6 ? 'Flower_4_Group' : 'Grass_Wispy_Tall'), x, z, .32 + rnd()*.18); }
+  for (let i = 0; i < 150; i++){ const a = rnd()*6.28, r = Math.sqrt(rnd())*56, x = ox + Math.cos(a)*r, z = oz + Math.sin(a)*r; if (blocked(x, z, .5) || Math.abs(x - ox) < 2 && z > oz + 8) continue; const k = rnd(); put('detail', k < .55 ? 'Grass_Common_Short' : k < .75 ? 'Fern_1' : k < .9 ? 'Plant_7_Big' : 'Pebble_Round_3', x, z, .55 + rnd()*.4); }
+  for (let i = 0; i < 9; i++){ const a = i*.7 + .3, x = ox - 8 + Math.cos(a)*10.3, z = oz - 6 + Math.sin(a)*10.3; put('near', 'Rock_Medium_' + (1 + i % 3), x, z, .28 + rnd()*.2); }
+  for (let i = 0; i < 14; i++){ const a = rnd()*6.28, r = 16 + rnd()*38, x = ox + Math.cos(a)*r, z = oz + Math.sin(a)*r; if (!blocked(x, z, 1.5) && Math.abs(x - ox) > 3){ const sc = .9 + rnd()*.5; put('near', rnd() < .5 ? 'Bush_Common_Flowers' : 'Bush_Common', x, z, sc); circles.push({ x, z, r:.7*sc }); } }
+  flora.flush();
+}
+function updateZoneLife(dt, t, zn){
+  if (zn !== 'gardens' || !ZONES.gardens.built) return; const Z = ZONES.gardens, p = active().pos;
+  for (const b of zoneLife.bfs){ const q = b.g.position, dx = b.tx - q.x, dz = b.tz - q.z, d = Math.hypot(dx, dz); if (d < .5){ b.tx = Z.cx + (Math.random() - .5)*90; b.tz = Z.cz + (Math.random() - .5)*90; b.ty = .8 + Math.random()*1.8; } else { q.x += dx/d*1.4*dt; q.z += dz/d*1.4*dt; q.y += (b.ty - q.y)*dt + Math.sin(t*6 + b.ph)*.01; b.g.rotation.y = Math.atan2(dx, dz); } const f = Math.sin(t*17 + b.ph)*.9; b.wl.rotation.y = -f; b.wr.rotation.y = f; }
+  for (const f of zoneLife.frogs){ f.t -= dt; if (f.t <= 0){ f.t = 2 + Math.random()*5; f.hop = .5; f.g.rotation.y = Math.random()*6.28; if (Math.hypot(p.x - f.x, p.z - f.z) < 14) tone(180 + Math.random()*40, .09, 'square', .03); } if (f.hop > 0){ f.hop -= dt; f.g.position.y = .1 + Math.sin(clamp(f.hop/.5, 0, 1)*Math.PI)*.35; } }
+  if (zoneLife.ring) zoneLife.ring.material.opacity = .28 + Math.sin(t*2)*.12;
+  for (const d of zoneLife.doors){ if (d.found) continue; d.halo.material.opacity = .2 + Math.sin(t*4 + d.i)*.1; if (Math.hypot(p.x - d.x, p.z - d.z) < 1.5 && state.mode === 'play'){ d.found = true; d.halo.material.opacity = 0; save.finds = save.finds || {}; (save.finds.gardens = save.finds.gardens || []).push(d.i); save.xp += 20; const n = save.finds.gardens.length; sparkle(d.x, .6, d.z); sfx.coin(); buzz(15);
+      if (n >= zoneLife.doors.length){ save.xp += 100; const stk = awardSticker(); toast(`All ${n} fairy doors found! ${stk ? 'New sticker: ' + stk[0] : '+100 XP'}`, true); sfx.win(); } else toast(`Fairy door ${n} of ${zoneLife.doors.length}! 🧚`, true); persist(); updateStats(); } }
+}
+function goPlace(k){
+  if (state.mode !== 'play'){ if (ms) beginPlay(); else startFreeExplore(); }
+  if (k === 'gardens'){ travel('gardens', ZONES.gardens.cx, ZONES.gardens.cz + 49, Math.PI); return; }
+  const pl = PLACES[k]; const [x, z] = freeSpot(pl.pos[0] + 1.5, pl.pos[1] + pl.r*.6); travel(zoneAt({ x, z }), x, z, Math.atan2(pl.pos[0] - x, pl.pos[1] - z), true); toast(pl.name, true);
+}
+{ for (const c of [[-99, 44], [-102, 34], [-102, 54], [-96, 60], [-106, 44], [-96, 26], [-88, 64]]) if (!blocked(c[0], c[1], 6)){ PLACES.botgate.pos = c; PLACES.botgate.itemAt = [c[0] + 2, c[1] + 2]; break; }
+  const [gx, gz] = PLACES.botgate.pos; addPortal('town', gx, gz, Math.PI/2, 'Botanical Gardens', 'gardens', ZONES.gardens.cx, ZONES.gardens.cz + 49, Math.PI);
+  box(world, 9, .05, 2.6, '#d9c39a', gx + 5.5, .01, gz, { cast:false, detail:'paving', ao:false }); }
 
 /* =========================================================
    Together Time: the daily ritual, scrapbook, garden and free play
@@ -3022,6 +3147,7 @@ const trail = { dots:null, path:null, t:0, key:'' };
   trail.dots.count = 0; trail.dots.frustumCulled = false; scene.add(trail.dots);
 }
 function updateTrail(dt, t, tgt){
+  if (tgt){ const pz = zoneAt(activePos()), tz = zoneAt(tgt); if (pz !== tz){ const po = portals.find(o => o.zone === pz && (o.toZone === tz || o.toZone === 'town')); tgt = po ? { x:po.x, z:po.z } : null; } if (pz !== 'town'){ trail.dots.count = 0; trail.path = null; return; } }
   const show = !!tgt && state.mode === 'play' && save.trail !== false;
   if (!show){ trail.dots.count = 0; trail.path = null; return; }
   const p = activePos(); const dist = Math.hypot(tgt.x - p.x, tgt.z - p.z);
@@ -3123,6 +3249,7 @@ function openMenu(paused){
     if (canPlay){
       const t = ritualMission();
       html += `<div class="sect"><h3>Today's pick</h3><div class="mlist"><button class="mcard pickme" data-mission="${t.id}"><b>⭐ ${esc(t.title)}</b><span>${esc(t.blurb)}</span></button></div></div>`;
+      html += `<div class="sect"><h3>Go somewhere</h3><div class="chips go">${[['dad', '🏡 Home'], ['park', '🌸 Jacaranda Park'], ['gardens', '🌿 Botanical Gardens'], ['kingswood', '🏫 Kingswood'], ['oval', '🏏 The oval'], ['goat', '🥤 Grazing Goat'], ['cathedral', '⛪ Cathedral']].map(([k, l]) => `<button class="chip" data-go="${k}">${l}</button>`).join('')}</div></div>`;
       html += miniGrid();
       html += `<div class="sect"><h3>Missions</h3><div class="mlist">${MISSIONS.filter(m => m.id !== t.id).map(m => `<button class="mcard" data-mission="${m.id}"><b>${esc(m.title)}</b><span>${m.steps.length} steps${playedToday(m.id) ? ' · <i class="tick">done today</i>' : ''}</span></button>`).join('')}<button class="mcard" data-act="explore"><b>🧭 Just explore</b><span>Wander around town</span></button></div></div>`;
       html += `<div class="sect"><h3>Your own missions</h3><div class="mlist">${save.custom.map(c => `<button class="mcard custom" data-custom="${c.id}"><b>${esc(c.title)}</b><span>${esc(PLACES[c.from].name)} → ${esc(PLACES[c.to].name)}</span></button>`).join('')}<button class="mcard custom" data-act="maker"><b>+ Make a mission</b><span>Turn something real into an adventure</span></button></div></div>`;
@@ -3208,6 +3335,7 @@ function startFreePlay(){ playMode = 'free'; startFreeExplore(); toast(`Free pla
 $('#menuPanel').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return; ensureAudio();
   if (b.dataset.key !== undefined){ keyEntry.push(+b.dataset.key); sfx.coin(); if (keyEntry.length === 3){ const ok = dailyKey().every((v, i) => v === keyEntry[i]); keyEntry = []; if (ok){ save.unlock = { date:todayKey(), at:Date.now() }; playMode = 'together'; persist(); sfx.win(); toast('The gate is open! 🌸', true); } else { sfx.miss(); toast('Not quite. Ask Dad again!'); } } openMenu(false); return; }
+  if (b.dataset.go){ playMode = isArryPhone() && !togetherOpen() ? 'free' : 'together'; goPlace(b.dataset.go); return; }
   if (b.dataset.tab){ menuTab = b.dataset.tab; sfx.step(); openMenu(state.mode === 'paused'); $('#menuPanel').scrollTop = 0; return; }
   if (b.dataset.ritual){ ritualStep(b.dataset.ritual); return; }
   if (b.dataset.quality){ save.quality = b.dataset.quality; persist(); applyQuality(save.quality === 'auto' ? (coarse ? 'medium' : 'high') : save.quality); openMenu(state.mode === 'paused'); return; }
@@ -3941,7 +4069,7 @@ const flag = scene.getObjectByName('flag');
 let loopErrors = 0; const fpsMon = { t:0, n:0 };
 let envTuneT = 0;
 function frame(now){
-  netTick(now); updateFlora(.016, now/1000);
+  netTick(now); updateFlora(.016, now/1000); updatePortals(.016, now/1000); clouds.position.set(camera.position.x > 1500 ? camera.position.x : 0, 0, camera.position.x > 1500 ? camera.position.z : 0);
   if ((envTuneT -= 1) <= 0){ envTuneT = 120; tuneEnv(); } try { step(now); } catch(e){ if (loopErrors++ < 5) console.error(e); } requestAnimationFrame(frame); }
 function step(now){
   const dt = Math.min(.05, (now - last) / 1000); last = now; const t = now / 1000;
