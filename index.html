@@ -137,6 +137,19 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
 #rotate span{display:block;font-size:64px;margin-bottom:12px;animation:rot 1.8s ease-in-out infinite}
 @keyframes rot{0%,20%{transform:rotate(0)}60%,100%{transform:rotate(-90deg)}}
 @media (orientation:portrait) and (pointer:coarse){#rotate{display:grid}}
+.tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:5px;border-radius:18px;background:rgba(0,0,0,.28);position:sticky;top:0;z-index:5;background:#2a2030}
+.tabs button{position:relative;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px 4px;border-radius:13px;border:0;background:transparent;color:var(--ink-dim);font:800 14px/1 var(--body)}
+.tabs button span{font-size:18px}
+.tabs button[aria-selected="true"]{background:linear-gradient(180deg,#ffc94d,#ff9f2e);color:#2a1408;box-shadow:0 3px 0 rgba(0,0,0,.25)}
+.tabs .dot{position:absolute;top:6px;right:10px;width:9px;height:9px;border-radius:50%;background:#ff3d6e}
+.mlist.big{grid-template-columns:repeat(auto-fill,minmax(180px,1fr))}
+.mlist.big .mcard{padding:16px 14px}
+.mcard.pickme{grid-column:1/-1;background:linear-gradient(120deg,rgba(255,194,61,.28),rgba(255,93,158,.2));border-color:rgba(255,214,120,.55)}
+.mcard:active,.chip:active,.play:active,.btn2:active,.step:active,.mood:active{transform:scale(.96)}
+.mcard,.chip,.play,.btn2,.step,.mood{transition:transform .08s ease}
+#menuPanel>*{animation:rise .28s ease both}
+@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){#menuPanel>*{animation:none}}
 .countdown{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 2px}
 .countdown span{padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.1);font:700 13px/1.2 var(--body)}
 .countdown b{color:var(--gold)}
@@ -1205,6 +1218,7 @@ const clouds = new THREE.Group(); scene.add(clouds);
    Trees (instanced)
    ========================================================= */
 const trees = { green:[], jac:[], cypress:[], hill:[] };
+let townTrees = null;
 function addTree(type, x, z, s){ trees[type].push([x, z, s]); if (type !== 'hill') circles.push({ x, z, r:.45 * s }); }
 const roadClear = (x, z) => (Math.abs(z - 20) < 7) || (Math.abs(x) < 9 && z < 20 && z > -140) || (Math.abs(z + 50) < 7 && x > -98 && x < 128);
 function tryTree(type, x, z, s){
@@ -1264,7 +1278,7 @@ for (let i = 0; i < 620; i++){ const a = R() * Math.PI * 2, r = 190 + Math.pow(R
   trees.hill.forEach(([x, z, s], i) => { const y = groundMin(x, z) - .3; m4.compose(pv.set(x, y + 2.6*s, z), q.identity(), sv.set(1.8*s, 1.6*s, 1.8*s)); hillCrowns.setMatrixAt(i, m4); hillCrowns.setColorAt(i, col.set(R() < .12 ? '#9a7fd0' : pick(['#4c6f35', '#56783a', '#617c3c', '#6d7a40']))); });
   trunks.count = ti; crowns.count = ci;
   trunks.castShadow = true; crowns.castShadow = true; crowns.receiveShadow = true; hillCrowns.receiveShadow = true;
-  world.add(trunks, crowns, hillCrowns);
+  world.add(trunks, crowns, hillCrowns); townTrees = { trunks, crowns, all, blob, trunkGeo, leafMat };
 }
 
 /* ---------- Grass tufts ---------- */
@@ -1780,10 +1794,11 @@ class Walker {
     if (sp > .3){ const want = Math.atan2(this.vx, this.vz); this.face += wrapAng(want - this.face) * (1 - Math.exp(-17*dt)); }
     return sp;
   }
-  physics(dt){ this.vy -= 20*dt; this.y += this.vy*dt; if (this.y < 0){ this.y = 0; this.vy = 0; } }
-  sync(){ this.g.position.set(this.pos.x, this.y, this.pos.z); this.g.rotation.y = this.face; }
+  physics(dt){ this.vy -= 20*dt; this.y += this.vy*dt; if (this.y < 0){ if (this.vy < -5){ this.squash = 1; puff(this.pos.x, this.pos.z, 6); if (this === active()) buzz(12); } this.y = 0; this.vy = 0; } if (this.squash > 0) this.squash = Math.max(0, this.squash - dt*5); }
+  sync(){ this.g.position.set(this.pos.x, this.y, this.pos.z); this.g.rotation.y = this.face; const q = this.squash || 0; if (q > 0 || this.g.scale.y !== 1){ const k = Math.sin(q*Math.PI)*.16; this.g.scale.set(1 + k*.6, 1 - k, 1 + k*.6); } }
   animate(dt){
     const sp = Math.hypot(this.vx, this.vz);
+    if (sp > 4.6 && this.y === 0 && this.kind !== 'adult' && this.kind !== 'kid'){ this.dustT = (this.dustT || 0) - dt; if (this.dustT <= 0){ this.dustT = .22; puff(this.pos.x - this.vx*.05, this.pos.z - this.vz*.05, 1); } }
     if (this.kind === 'dog'){
       this.phase += dt * (4 + sp*2.4); const a = clamp(sp/4, 0, 1);
       this.rig.legs.forEach((l, i) => l.rotation.x = Math.sin(this.phase + (i % 2 ? 0 : Math.PI) + (i > 1 ? Math.PI/2 : 0)) * .8 * a);
@@ -2068,6 +2083,13 @@ function hoot(){
   for (const n of npcs){ if (Math.hypot(n.pos.x - car.pos.x, n.pos.z - car.pos.z) < 18){ n.vy = 3.5; n.face = Math.atan2(car.pos.x - n.pos.x, car.pos.z - n.pos.z); n.talkT = 1.4; n.pose = { type:'wave', until:performance.now()/1000 + 1.2 }; } }
 }
 const sparks = [];
+const DUST_GEO = new THREE.SphereGeometry(.09, 6, 5);
+function puff(x, z, n){
+  if (sparks.length > 90) return;
+  for (let i = 0; i < n; i++){ const m = new THREE.Mesh(DUST_GEO, new THREE.MeshBasicMaterial({ color:'#e6dcc8', transparent:true, opacity:.7 })); m.position.set(x + (Math.random() - .5)*.3, .08, z + (Math.random() - .5)*.3); scene.add(m);
+    sparks.push({ m, v:new THREE.Vector3((Math.random() - .5)*1.6, 1.1 + Math.random()*.7, (Math.random() - .5)*1.6), life:.5 }); }
+}
+function buzz(ms){ try { navigator.vibrate && navigator.vibrate(ms); } catch(e) {} }
 function sparkle(x, y, z){
   for (let i = 0; i < 14; i++){ const m = new THREE.Mesh(new THREE.OctahedronGeometry(.06), new THREE.MeshBasicMaterial({ color:pick(['#ffd35a', '#ff8fc0', '#ffffff', '#8fd0ff']), transparent:true })); m.position.set(x, y, z); scene.add(m); const a = R()*Math.PI*2, e = R()*1.2; sparks.push({ m, v:new THREE.Vector3(Math.cos(a)*Math.cos(e)*2.4, Math.sin(e)*2.4 + 1, Math.sin(a)*Math.cos(e)*2.4), life:.8 }); }
 }
@@ -2262,12 +2284,87 @@ function finishMission(){
 }
 
 
+
+/* =========================================================
+   Real models for trees and plants (Quaternius nature kit, CC0).
+   Loaded after the town is built; if they can't load, the simple trees stay.
+   ========================================================= */
+const windU = { value:0 }, FCELL = 44, fcells = new Map(), flora = { ready:false, t:0 };
+function windy(m, amp){
+  m.onBeforeCompile = sh => { sh.uniforms.uWind = windU; sh.vertexShader = 'uniform float uWind;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+  #ifdef USE_INSTANCING
+    vec4 wPos = instanceMatrix * vec4(position, 1.0);
+  #else
+    vec4 wPos = vec4(position, 1.0);
+  #endif
+  float sway = sin(uWind*1.7 + wPos.x*.33 + wPos.z*.27) * ${amp.toFixed(4)} * max(0.0, position.y) * (0.6 + 0.4*sin(uWind*.6 + wPos.z*.1));
+  transformed.x += sway; transformed.z += sway*.6;`); };
+  m.customProgramCacheKey = () => 'wind' + amp;
+}
+function fcell(x, z){ const i = Math.floor(x/FCELL), j = Math.floor(z/FCELL), k = i + ',' + j; let c = fcells.get(k); if (!c){ c = { cx:(i + .5)*FCELL, cz:(j + .5)*FCELL, trees:[], near:{}, detail:{}, gNear:new THREE.Group(), gDetail:new THREE.Group(), gFar:new THREE.Group() }; fcells.set(k, c); } return c; }
+async function loadFlora(){
+  if (!townTrees) return;
+  try {
+    const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js'); const L = new GLTFLoader().setPath('assets/nature/');
+    const names = ['CommonTree_1', 'CommonTree_2', 'CommonTree_3', 'CommonTree_5', 'CommonTree_1_jac', 'CommonTree_2_jac', 'TwistedTree_1_jac', 'Pine_1', 'Pine_2', 'Bush_Common', 'Bush_Common_Flowers', 'Flower_3_Group', 'Flower_4_Group', 'Grass_Common_Short', 'Grass_Wispy_Tall', 'Rock_Medium_1', 'Rock_Medium_2', 'Rock_Medium_3', 'Fern_1', 'Plant_7_Big', 'Mushroom_Common', 'Pebble_Round_1', 'Pebble_Round_3'];
+    const G = {}; await Promise.all(names.map(n => L.loadAsync(n + '.gltf').then(g => { g.scene.updateMatrixWorld(true); G[n] = g.scene; })));
+    const rnd = (() => { let a = 12345; return () => (a = (a*1664525 + 1013904223) >>> 0) / 4294967296; })();
+    const put = (kind, name, x, z, sc, y = 0) => { const c = fcell(x, z); (c[kind][name] = c[kind][name] || []).push([x, y, z, sc, rnd()*6.28]); };
+    // trees: swap each simple tree for a model
+    for (const [type, x, z, sz] of townTrees.all){
+      const big = type === 'jac' && sz >= 1.2;
+      const name = type === 'jac' ? (big ? 'TwistedTree_1_jac' : (rnd() < .5 ? 'CommonTree_1_jac' : 'CommonTree_2_jac')) : type === 'cypress' ? (rnd() < .5 ? 'Pine_1' : 'Pine_2') : ['CommonTree_1', 'CommonTree_2', 'CommonTree_3', 'CommonTree_5'][Math.floor(rnd()*4)];
+      put('near', name, x, z, (big ? .5 : type === 'cypress' ? 1.15 : 1.0) * sz * (.9 + rnd()*.2)); fcell(x, z).trees.push([type, x, z, sz]);
+    }
+    // small things: grass, flowers, ferns, rocks
+    const ok = (x, z, r = 1) => !roadClear(x, z) && !blocked(x, z, r) && Math.hypot(x - OVAL.x, z - OVAL.z) > OVAL.r + 2 && !(x > 50 && x < 90 && z < -64 && z > -114);
+    for (let i = 0; i < 1500; i++){ const a = rnd()*6.28, r = Math.sqrt(rnd())*165, x = WCX + Math.cos(a)*r, z = WCZ + Math.sin(a)*r; if (!ok(x, z, .6)) continue; const k = rnd();
+      if (k < .62) put('detail', rnd() < .7 ? 'Grass_Common_Short' : 'Grass_Wispy_Tall', x, z, .55 + rnd()*.4);
+      else if (k < .8) put('detail', rnd() < .5 ? 'Flower_3_Group' : 'Flower_4_Group', x, z, .5 + rnd()*.3);
+      else if (k < .88) put('detail', rnd() < .5 ? 'Fern_1' : 'Plant_7_Big', x, z, .5 + rnd()*.4);
+      else if (k < .95) put('detail', rnd() < .5 ? 'Pebble_Round_1' : 'Pebble_Round_3', x, z, .8 + rnd()*.8);
+      else put('detail', 'Mushroom_Common', x, z, .6 + rnd()*.4); }
+    for (let i = 0; i < 110; i++){ const a = rnd()*6.28, r = Math.sqrt(rnd())*165, x = WCX + Math.cos(a)*r, z = WCZ + Math.sin(a)*r; if (!ok(x, z, 2.6)) continue; if (rnd() < .3){ const sc = .35 + rnd()*.35; put('near', 'Rock_Medium_' + (1 + Math.floor(rnd()*3)), x, z, sc); circles.push({ x, z, r:1.3*sc }); } else { const sc = .8 + rnd()*.5; put('near', rnd() < .45 ? 'Bush_Common_Flowers' : 'Bush_Common', x, z, sc); circles.push({ x, z, r:.7*sc }); } }
+    // the park and Dad's garden get extra flowers
+    for (let i = 0; i < 90; i++){ const x = -70 + (rnd() - .5)*56, z = 45 + (rnd() - .5)*30; if (ok(x, z, .6)) put('detail', rnd() < .5 ? 'Flower_3_Group' : 'Flower_4_Group', x, z, .55 + rnd()*.3); }
+    for (let i = 0; i < 26; i++){ const x = 1 + rnd()*22, z = 50 + rnd()*14; if (ok(x, z, .8)) put('detail', rnd() < .6 ? 'Grass_Common_Short' : 'Flower_4_Group', x, z, .5 + rnd()*.25); }
+    const P = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), pv = new THREE.Vector3(), sv = new THREE.Vector3(), col = new THREE.Color(), seen = new Set();
+    const build = (group, name, list, cast) => {
+      G[name].traverse(o => { if (!o.isMesh) return; const m = o.material;
+        if (!seen.has(m)){ seen.add(m); m.envMapIntensity = .55; if (m.transparent || m.alphaTest > 0){ m.transparent = false; m.alphaTest = .45; } m.side = THREE.DoubleSide; if (/lea|grass|flower|fern|plant/i.test(m.name)) windy(m, /grass|flower|plant|fern/i.test(m.name) ? .05 : .012); }
+        const im = new THREE.InstancedMesh(o.geometry, m, list.length);
+        list.forEach(([x, y, z, sc, ry], i) => { P.compose(pv.set(x, y, z), q.setFromAxisAngle(up, ry), sv.set(sc, sc, sc)); im.setMatrixAt(i, P.clone().multiply(o.matrixWorld)); });
+        im.castShadow = cast; im.receiveShadow = true; im.computeBoundingSphere(); group.add(im); });
+    };
+    const greens = ['#4f7f36', '#5e8c3c', '#46733a', '#6b9440'], jacs = ['#b79be8', '#c3a8f0', '#a98ade'], cyp = ['#355f3a', '#2f5434'];
+    for (const c of fcells.values()){
+      for (const [n, list] of Object.entries(c.near)) build(c.gNear, n, list, true);
+      for (const [n, list] of Object.entries(c.detail)) build(c.gDetail, n, list, false);
+      if (c.trees.length){ // far stand-ins: the old simple trees, one small batch per block
+        const tr = new THREE.InstancedMesh(townTrees.trunkGeo, mat('#5a4030'), c.trees.length), cr = new THREE.InstancedMesh(townTrees.blob, townTrees.leafMat, c.trees.length);
+        c.trees.forEach(([type, x, z, sz], i) => { const th = type === 'cypress' ? 1.4*sz : 2.4*sz; P.compose(pv.set(x, th/2, z), q.identity(), sv.set(sz, th, sz)); tr.setMatrixAt(i, P);
+          P.compose(pv.set(x, th + (type === 'cypress' ? 2.6 : 1.3)*sz, z), q.identity(), type === 'cypress' ? sv.set(1.2*sz, 3*sz, 1.2*sz) : sv.set(2.3*sz, 1.9*sz, 2.3*sz)); cr.setMatrixAt(i, P); cr.setColorAt(i, col.set((type === 'jac' ? jacs : type === 'cypress' ? cyp : greens)[i % 2])); });
+        tr.computeBoundingSphere(); cr.computeBoundingSphere(); c.gFar.add(tr, cr);
+      }
+      c.gNear.visible = c.gDetail.visible = false; scene.add(c.gNear, c.gDetail, c.gFar);
+    }
+    // retire the old town trees (hill trees stay)
+    const zero = new THREE.Matrix4().makeScale(0, 0, 0); for (let i = 0; i < townTrees.all.length; i++) townTrees.trunks.setMatrixAt(i, zero); townTrees.trunks.instanceMatrix.needsUpdate = true; townTrees.crowns.visible = false;
+    flora.ready = true;
+  } catch(e){ console.warn('Models not loaded, keeping simple trees:', e && e.message); }
+}
+function updateFlora(dt, t){
+  windU.value = t; if (!flora.ready) return; flora.t -= dt; if (flora.t > 0) return; flora.t = .35;
+  const low = quality === 'low', rn = low ? 70 : 125, rd = low ? 34 : 62, cx = camera.position.x, cz = camera.position.z;
+  for (const c of fcells.values()){ const d = Math.hypot(c.cx - cx, c.cz - cz); c.gNear.visible = d < rn; c.gFar.visible = !c.gNear.visible; c.gDetail.visible = d < rd; }
+}
+
 /* =========================================================
    Together Time: the daily ritual, scrapbook, garden and free play
    ========================================================= */
 const RITUAL_STEPS = [
-  { id:'hello', icon:'👋', label:'Hello' }, { id:'question', icon:'💬', label:'Chat' }, { id:'adventure', icon:'🗺️', label:'Adventure' },
-  { id:'gift', icon:'✏️', label:'Gift' }, { id:'stars', icon:'🌙', label:'Stars' }, { id:'challenge', icon:'⭐', label:'Challenge' }, { id:'goodbye', icon:'🤗', label:'Goodbye' },
+  { id:'hello', icon:'👋', label:'Hello' }, { id:'question', icon:'💬', label:'Chat' }, { id:'adventure', icon:'🎮', label:'Play' },
+  { id:'gift', icon:'✏️', label:'Gift' }, { id:'stars', icon:'🌙', label:'Stars' }, { id:'challenge', icon:'⭐', label:'Challenge' }, { id:'goodbye', icon:'🤗', label:'Goodnight' },
 ];
 const KEY_ICONS = ['🐕', '🏏', '🌸', '⭐', '🍦', '🚙', '🌙', '☀️', '❤️'];
 const MOODS = [['😄', 'Happy'], ['🤩', 'Excited'], ['😌', 'Calm'], ['😴', 'Tired'], ['😟', 'Worried'], ['😢', 'Sad']];
@@ -2390,7 +2487,7 @@ function starsScene(){
     $('#stDone').onclick = () => { $('#sheet').classList.remove('peek'); hideSheet(); setNight(false); dad.pose = arry.pose = null; dog.mode = 'follow'; markRitual('stars'); openMenu(false); };
   }, 2200);
 }
-function activeSteps(){ const r = ritual(); return r.bedtime ? RITUAL_STEPS.filter(x => ['hello', 'question', 'stars', 'goodbye'].includes(x.id)) : RITUAL_STEPS.filter(x => x.id !== 'stars'); }
+function activeSteps(){ const r = ritual(), ids = r.bedtime ? ['hello', 'stars', 'goodbye'] : ['hello', 'adventure', 'goodbye']; return ids.map(id => RITUAL_STEPS.find(x => x.id === id)); }
 /* ---------- voice notes ---------- */
 async function voiceRecorder(box){
   let rec = null, chunks = [], url = null, timer = 0;
@@ -2532,10 +2629,10 @@ function ritualStep(id){
   ensureAudio();
   if (id === 'hello') return helloSheet();
   if (id === 'question') return questionSheet();
-  if (id === 'adventure'){ playMode = 'together'; markRitual('adventureStarted'); startMission(ritualMission()); return; }
+  if (id === 'adventure'){ playMode = 'together'; menuTab = 'play'; openMenu(false); toast('Pick anything to play together!', true); return; }
   if (id === 'gift') return giftSheet();
   if (id === 'challenge') return challengeSheet();
-  if (id === 'goodbye') return goodbyeScene();
+  if (id === 'goodbye') return giftSheet(true);
   if (id === 'stars') return starsScene();
 }
 function helloSheet(){
@@ -2552,7 +2649,7 @@ function helloSheet(){
     const [e, l] = MOODS[+b.dataset.mood]; const rr = ritual(); rr.mood = l; rr.moods = rr.moods || {}; rr.moods[save.role || activeId] = l; markRitual('hello'); sfx.step();
     if (l === 'Worried' || l === 'Sad') card.innerHTML = `<h2>${e} Thanks for telling me</h2><p>${isArryPhone() ? 'Dad is here. You can tell him what is on your mind, or you can just play. Either is OK.' : 'Gentle idea: ask what is on her mind, or start with a joke and a hug in the game.'}</p><div class="row"><button class="play" id="hNext">Next</button></div>`;
     else card.innerHTML = `<h2>${e} ${l}!</h2><p>Lekker. Let's go.</p><div class="row"><button class="play" id="hNext">Next</button></div>`;
-    $('#hNext').onclick = () => { hideSheet(); openMenu(false); };
+    $('#hNext').onclick = () => { questionSheet(); };
   });
 }
 function questionSheet(){
@@ -2565,14 +2662,14 @@ function questionSheet(){
   const f = $('#qFlip'); if (f) f.onclick = () => { $('#qFlipTxt').textContent = KID_ASKS[Math.floor(Math.random()*KID_ASKS.length)]; };
   $('#qDone').onclick = () => { const a = $('#qAns').value.trim(); if (a){ if (c.kind === 'story'){ save.story = [...story, a]; } scrap({ type:'answer', q:c.text, answer:a }); } markRitual('question'); sfx.step(); hideSheet(); openMenu(false); };
 }
-function giftSheet(){
+function giftSheet(thenHug){
   const sp = specialToday(), forWho = sp && sp.who === 'mom' ? 'Mom' : sp && sp.who === 'sis' ? sp.name : (isArryPhone() ? 'Dad' : 'Arry');
   showSheet(`<div class="eyebrow">Together Time · Leave a gift</div><h2>${sp && ['mom', 'sis', 'dad'].includes(sp.who) ? `Make a birthday card for ${forWho} 🎂` : `Draw something for ${forWho}`}</h2>
     <canvas id="pad" width="480" height="320" aria-label="Drawing pad"></canvas>
     <div class="swatches">${['#2a2018', '#ff5d9e', '#e8443a', '#ffb02e', '#ffd84d', '#5ac06a', '#3d8bff', '#9a6be0', '#8a5a36', '#ffffff'].map((c, i) => `<button class="sw${i === 1 ? ' on' : ''}" data-c="${c}" style="background:${c}" aria-label="Colour ${c}"></button>`).join('')}<button class="btn2" id="padClear">Clear</button></div>
     <div class="voice" id="gVoice"></div>
     <div class="field"><label for="gNote">A little note</label><input id="gNote" maxlength="140" placeholder="I love you because..."></div>
-    <div class="row"><button class="play" id="gSend">Put it in the letterbox</button><button class="btn2" id="gSkip">Skip today</button></div>`);
+    <div class="row"><button class="play" id="gSend">Put it in the letterbox</button><button class="btn2" id="gSkip">${thenHug ? 'Straight to the hug' : 'Not now'}</button></div>`);
   const cv = $('#pad'), k = cv.getContext('2d'); k.fillStyle = '#fffaf0'; k.fillRect(0, 0, cv.width, cv.height); k.lineCap = k.lineJoin = 'round'; let col = '#ff5d9e', drawing = false, last = null;
   const pt = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left)*cv.width/r.width, (e.clientY - r.top)*cv.height/r.height]; };
   cv.onpointerdown = e => { drawing = true; cv.setPointerCapture(e.pointerId); last = pt(e); k.fillStyle = col; k.beginPath(); k.arc(last[0], last[1], col === '#ffffff' ? 9 : 4, 0, 7); k.fill(); };
@@ -2581,8 +2678,8 @@ function giftSheet(){
   $('#sheetCard').querySelectorAll('.sw').forEach(b => b.onclick = () => { col = b.dataset.c; $('#sheetCard').querySelectorAll('.sw').forEach(x => x.classList.toggle('on', x === b)); });
   voiceRecorder($('#gVoice'));
   $('#padClear').onclick = () => { k.fillStyle = '#fffaf0'; k.fillRect(0, 0, cv.width, cv.height); };
-  $('#gSend').onclick = () => { const sm = document.createElement('canvas'); sm.width = 360; sm.height = 240; sm.getContext('2d').drawImage(cv, 0, 0, 360, 240); scrap({ type:'gift', from:save.role || activeId, img:sm.toDataURL('image/jpeg', .7), note:$('#gNote').value.trim(), audio:$('#gVoice').dataset.audio || null, forWho }); const withAudio = (save.scrapbook || []).filter(e => e.audio); if (withAudio.length > 15){ withAudio.slice(15).forEach(e => e.audio = null); persist(); } markRitual('gift'); sfx.win(); hideSheet(); toast('In the letterbox! 💌', true); openMenu(false); };
-  $('#gSkip').onclick = () => { markRitual('gift'); hideSheet(); openMenu(false); };
+  $('#gSend').onclick = () => { const sm = document.createElement('canvas'); sm.width = 360; sm.height = 240; sm.getContext('2d').drawImage(cv, 0, 0, 360, 240); scrap({ type:'gift', from:save.role || activeId, img:sm.toDataURL('image/jpeg', .7), note:$('#gNote').value.trim(), audio:$('#gVoice').dataset.audio || null, forWho }); const withAudio = (save.scrapbook || []).filter(e => e.audio); if (withAudio.length > 15){ withAudio.slice(15).forEach(e => e.audio = null); persist(); } markRitual('gift'); sfx.win(); hideSheet(); toast('In the letterbox! 💌', true); if (thenHug) goodbyeScene(); else openMenu(false); };
+  $('#gSkip').onclick = () => { hideSheet(); if (thenHug) goodbyeScene(); else openMenu(false); };
 }
 function challengeSheet(){
   const d = dayNumber(new Date()), text = CHALLENGES[(d*7) % CHALLENGES.length];
@@ -2602,9 +2699,11 @@ function goodbyeScene(fromRemote){
     const r = ritual(); const first = !r.done.goodbye; markRitual('goodbye');
     let stk = null; if (first){ save.days = (save.days || 0) + 1; save.xp += 50; stk = awardSticker(); }
     const unlocked = GARDEN.find(([n]) => n === save.days); buildGarden();
+    const chText = CHALLENGES[(dayNumber(new Date())*7) % CHALLENGES.length]; if (first && !(save.challenges || []).some(c => c.date === todayKey())){ save.challenges = save.challenges || []; save.challenges.push({ date:todayKey(), text:chText }); }
     persist(); updateStats();
     showSheet(`<div class="big-done"><div class="eyebrow">Together Time</div><h2>See you tomorrow!</h2></div>
       <p style="text-align:center">That's <b>${save.days} day${save.days === 1 ? '' : 's'} together</b> in Arry's World.${unlocked ? `<br>New in your garden: <b>${unlocked[1]}</b> 🌱` : ''}${stk ? `<br>New sticker: <span style="font-size:26px">${stk[0]}</span> <b>${esc(stk[1])}</b>` : ''}</p>
+      <div class="qcard small"><div class="eyebrow">Before next time</div><p>${esc(chText)}</p></div>
       <div class="row" style="justify-content:center"><button class="play" id="byeOk">Goodnight 💛</button>${unlocked ? '<button class="btn2" id="byeGarden">See the garden</button>' : ''}</div>`);
     $('#byeOk').onclick = () => { hideSheet(); dad.pose = arry.pose = null; dog.mode = 'follow'; openMenu(false); };
     const bg = $('#byeGarden'); if (bg) bg.onclick = () => { hideSheet(); sceneCam = { pos:new THREE.Vector3(12, 5.5, 47), look:new THREE.Vector3(10, .8, 57), t:0 }; setTimeout(() => { dad.pose = arry.pose = null; dog.mode = 'follow'; openMenu(false); }, 4500); };
@@ -2626,7 +2725,7 @@ function buildGarden(){
   if (n >= 20){ box(G, .1, 2.6, .1, '#2d2d2d', 23, 0, 52); mesh(new THREE.OctahedronGeometry(.35), new THREE.MeshStandardMaterial({ color:'#fff4b0', emissive:'#ffd35a', emissiveIntensity:2.5 }), G, 23, 2.9, 52, false); }
 }
 buildGarden();
-setTimeout(netStart, 300);
+setTimeout(netStart, 300); setTimeout(loadFlora, 60);
 (function decorate(){
   const sp = specialToday(); if (!sp) return; const G = new THREE.Group(); scene.add(G);
   if (sp.who === 'xmas'){
@@ -2699,7 +2798,7 @@ addEventListener('blur', () => input.keys.clear());
 $('#jumpBtn').addEventListener('pointerdown', e => { e.stopPropagation(); ensureAudio(); input.jump = true; });
 $('#actionBtn').addEventListener('click', () => doAction());
 $('#emoteBtn').addEventListener('click', () => emote());
-$('#pauseBtn').addEventListener('click', () => openMenu(true));
+$('#pauseBtn').addEventListener('click', () => { menuTab = 'today'; openMenu(true); });
 const canFS = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
 async function toggleFullscreen(){
   try {
@@ -2994,42 +3093,54 @@ function openMenu(paused){
       ${countdownHtml()}${presenceHtml()}
       ${save.role === 'dad' && !(net.on && net.partnerOnline) ? `<div class="dadkey"><span>Today's key for Arry</span><b>${keyIcons(dailyKey())}</b></div>` : ''}
       <div class="steps">${steps}</div>
-      ${nxt ? `<h2>${nxt.icon} ${nxt.id === 'adventure' ? esc(ritualMission().title) : esc(nxt.label === 'Chat' ? todaysCard().title : nxt.label)}</h2><p>${esc(stepBlurb(nxt.id))}</p><div class="row"><button class="play" data-ritual="${nxt.id}">${r.startedAt ? 'Next' : (r.bedtime ? 'Start bedtime' : 'Start Together Time')}</button>${!r.startedAt && !r.bedtime && new Date().getHours() >= 18 ? '<button class="btn2" data-act="bedtime">🌙 Quick bedtime version</button>' : ''}${!r.startedAt && r.bedtime ? '<button class="btn2" data-act="fulltime">Full version</button>' : ''}</div>` : `<h2>All done today 💛</h2><p>Lovely session. Come back tomorrow for a new question, adventure and challenge.</p>`}
+      ${nxt ? `<h2>${nxt.icon} ${esc({ hello:'Hello!', adventure:'Play together', goodbye:'Goodnight', stars:'Stargazing' }[nxt.id] || nxt.label)}</h2><p>${esc(stepBlurb(nxt.id))}</p><div class="row"><button class="play" data-ritual="${nxt.id}">${r.startedAt ? 'Next' : (r.bedtime ? 'Start bedtime' : 'Start Together Time')}</button>${!r.startedAt && !r.bedtime && new Date().getHours() >= 18 ? '<button class="btn2" data-act="bedtime">🌙 Quick bedtime version</button>' : ''}${!r.startedAt && r.bedtime ? '<button class="btn2" data-act="fulltime">Full version</button>' : ''}</div>` : `<h2>All done today 💛</h2><p>Lovely session. Come back tomorrow for a new question, adventure and challenge.</p>`}
       <div class="meta" style="margin-top:12px"><span>${r.bedtime ? 'About 5 minutes' : 'About 15 minutes'}</span>${r.startedAt && !r.done.goodbye ? `<span>${mins} min so far</span>` : ''}<span>${save.days || 0} days together</span></div></div>`;
   }
-  const canPlay = open || playMode === 'free';
-  if (canPlay && (!isArryPhone() || open)){
-    html += miniGrid();
-    const t = ritualMission();
-    html += `<div class="sect"><h3>All missions</h3><div class="mlist">${[t, ...MISSIONS.filter(m => m.id !== t.id)].map(m => `<button class="mcard" data-mission="${m.id}"><b>${esc(m.title)}</b><span>${m.steps.length} steps${playedToday(m.id) ? ' · <i class="tick">done today</i>' : ''}</span></button>`).join('')}</div></div>`;
-    html += `<div class="sect"><h3>Your missions</h3><div class="mlist">${save.custom.map(c => `<button class="mcard custom" data-custom="${c.id}"><b>${esc(c.title)}</b><span>${esc(PLACES[c.from].name)} → ${esc(PLACES[c.to].name)}</span></button>`).join('')}<button class="mcard custom" data-act="maker"><b>+ Make a mission</b><span>Turn something real into an adventure</span></button></div></div>`;
-  }
-  if (isArryPhone() && !open && !paused){
-    const left = freeLeft();
-    html += `<div class="today free"><div class="eyebrow">Free play</div><h2>Show your friends</h2><p>${left > 0 ? `Explore Makhanda and play the mini-games with a friend. <b>${Math.ceil(left/60)} minutes</b> left today.` : 'Free play is finished for today. See you at Together Time!'}</p>${left > 0 ? '<div class="row"><button class="play" data-act="free">Free play</button></div>' : ''}</div>`;
-  }
-  html += `<div class="sect"><h3>Our stuff</h3><div class="mlist">
-    <button class="mcard" data-act="scrapbook"><b>📖 Scrapbook</b><span>${save.unseen ? `💌 ${save.unseen} new in the letterbox` : `${(save.scrapbook || []).length} memories`}</span></button>
-    <button class="mcard" data-act="stickers"><b>⭐ Sticker book</b><span>${(save.stickers || []).length} of ${STICKERS.length}</span></button>
-    <button class="mcard" data-act="garden"><b>🌱 Our garden</b><span>${save.days || 0} days together</span></button>
-    <button class="mcard" data-act="draw"><b>✏️ Draw something</b><span>For next time</span></button>
-    ${(!isArryPhone() || open) ? '<button class="mcard" data-act="explore"><b>🧭 Explore</b><span>Wander around town</span></button>' : ''}</div></div>`;
-  if (!linkId()) html += `<div class="seg"><span class="lab">Who's playing?</span><div class="opts">
+  const canPlay = (open || playMode === 'free') && (!isArryPhone() || open);
+  const todayHtml = html; html = `<div class="logo"><h1>Arry's World ${HEART_SVG}</h1><p>MAKHANDA ADVENTURES</p></div>`;
+  const tabs = [['today', '☀️', 'Today'], ['play', '🎮', 'Play'], ['us', '💛', 'Us'], ['more', '⚙️', 'More']];
+  html += `<div class="tabs" role="tablist">${tabs.map(([k, e, l]) => `<button role="tab" data-tab="${k}" aria-selected="${menuTab === k}"><span>${e}</span>${l}${k === 'us' && save.unseen ? '<i class="dot"></i>' : ''}</button>`).join('')}</div>`;
+  if (menuTab === 'today'){
+    html += todayHtml.replace(/^<div class="logo">.*?<\/div>/s, '');
+    if (isArryPhone() && !open && !paused){
+      const left = freeLeft();
+      html += `<div class="today free"><div class="eyebrow">Free play</div><h2>Show your friends</h2><p>${left > 0 ? `Explore Makhanda and play the mini-games with a friend. <b>${Math.ceil(left/60)} minutes</b> left today.` : 'Free play is finished for today. See you at Together Time!'}</p>${left > 0 ? '<div class="row"><button class="play" data-act="free">Free play</button></div>' : ''}</div>`;
+    }
+  } else if (menuTab === 'play'){
+    if (canPlay){
+      const t = ritualMission();
+      html += `<div class="sect"><h3>Today's pick</h3><div class="mlist"><button class="mcard pickme" data-mission="${t.id}"><b>⭐ ${esc(t.title)}</b><span>${esc(t.blurb)}</span></button></div></div>`;
+      html += miniGrid();
+      html += `<div class="sect"><h3>Missions</h3><div class="mlist">${MISSIONS.filter(m => m.id !== t.id).map(m => `<button class="mcard" data-mission="${m.id}"><b>${esc(m.title)}</b><span>${m.steps.length} steps${playedToday(m.id) ? ' · <i class="tick">done today</i>' : ''}</span></button>`).join('')}<button class="mcard" data-act="explore"><b>🧭 Just explore</b><span>Wander around town</span></button></div></div>`;
+      html += `<div class="sect"><h3>Your own missions</h3><div class="mlist">${save.custom.map(c => `<button class="mcard custom" data-custom="${c.id}"><b>${esc(c.title)}</b><span>${esc(PLACES[c.from].name)} → ${esc(PLACES[c.to].name)}</span></button>`).join('')}<button class="mcard custom" data-act="maker"><b>+ Make a mission</b><span>Turn something real into an adventure</span></button></div></div>`;
+    } else {
+      const left = freeLeft();
+      html += `<div class="today gate"><div class="eyebrow">Play</div><h2>🔒 Waiting for Dad</h2><p>The missions and games open when Dad is in the game with you.${left > 0 ? ` Until then you have <b>${Math.ceil(left/60)} minutes</b> of free play.` : ''}</p>${left > 0 ? '<div class="row"><button class="play" data-act="free">Free play</button></div>' : ''}</div>`;
+    }
+  } else if (menuTab === 'us'){
+    html += `<div class="sect"><div class="mlist big">
+      <button class="mcard" data-act="scrapbook"><b>📖 Scrapbook</b><span>${save.unseen ? `💌 ${save.unseen} new in the letterbox` : `${(save.scrapbook || []).length} memories`}</span></button>
+      <button class="mcard" data-act="draw"><b>✏️ Draw or record</b><span>Leave something in the letterbox</span></button>
+      <button class="mcard" data-act="stickers"><b>⭐ Sticker book</b><span>${(save.stickers || []).length} of ${STICKERS.length}</span></button>
+      <button class="mcard" data-act="garden"><b>🌱 Our garden</b><span>${save.days || 0} days together</span></button>
+      <button class="mcard" data-act="journal"><b>🗺️ Adventure journal</b><span>${save.journal.length} missions</span></button></div></div>`;
+    html += countdownHtml() + presenceHtml();
+    html += `<div class="statline"><span>Level <b>${level()}</b></span><span>XP <b>${save.xp}</b></span><span>Coins <b>${save.coins}</b></span><span>Makhanda coins <b>${save.found.length}/20</b></span></div>`;
+  } else {
+    if (!linkId()) html += `<div class="seg"><span class="lab">Who's playing?</span><div class="opts">
       <button data-who="arry" aria-pressed="${activeId === 'arry'}"><i class="av arry">A</i>Arry</button>
       <button data-who="dad" aria-pressed="${activeId === 'dad'}"><i class="av dad">D</i>Dad</button></div></div>`;
-  html += `<div class="wardrobe">${['arry', 'dad'].map(id => `<div class="wrow"><span class="lab">${id === 'dad' ? "Dad's outfit" : "Arry's outfit"}</span><div class="chips">${Object.entries(OUTFITS[id]).map(([k, o]) => `<button class="chip" data-outfit="${id}:${k}" aria-pressed="${save.outfit[id] === k}">${esc(o.label)}</button>`).join('')}</div></div>`).join('')}</div>`;
-  html += `<details class="settings"><summary>Settings</summary><div class="wardrobe">
+    html += `<div class="wardrobe">${['arry', 'dad'].map(id => `<div class="wrow"><span class="lab">${id === 'dad' ? "Dad's outfit" : "Arry's outfit"}</span><div class="chips">${Object.entries(OUTFITS[id]).map(([k, o]) => `<button class="chip" data-outfit="${id}:${k}" aria-pressed="${save.outfit[id] === k}">${esc(o.label)}</button>`).join('')}</div></div>`).join('')}
     <div class="wrow"><span class="lab">Graphics</span><div class="chips">${[['auto', 'Auto'], ['high', 'Sharp'], ['low', 'Fast']].map(([k, l]) => `<button class="chip" data-quality="${k}" aria-pressed="${(save.quality || 'auto') === k}">${l}</button>`).join('')}</div></div>
     <div class="wrow"><span class="lab">Camera</span><div class="chips"><button class="chip" data-toggle="camFollow" aria-pressed="${!!save.camFollow}">Follows me</button><button class="chip" data-toggle="trail" aria-pressed="${save.trail !== false}">Guide trail</button></div></div>
-    <div class="wrow"><span class="lab">Phone</span><div class="chips"><button class="chip" data-act="setup">${save.role ? (save.role === 'dad' ? "Dad's phone" : "Arry's phone") + ' · change' : 'Set up'}</button>${canFS ? '<button class="chip" data-act="fs">Full screen</button>' : ''}<button class="chip" data-act="journal">Journal</button></div></div>
-    <div class="wrow"><span class="lab">Memories</span><div class="chips"><button class="chip" data-act="dates">🎂 Birthdays</button><button class="chip" data-act="backup">💾 Save a backup</button><button class="chip" data-act="restore">Restore</button></div></div>
+    <div class="wrow"><span class="lab">This phone</span><div class="chips"><button class="chip" data-act="setup">${save.role ? (save.role === 'dad' ? "Dad's phone" : "Arry's phone") + ' · change' : 'Set up'}</button>${canFS ? '<button class="chip" data-act="fs">Full screen</button>' : ''}<span class="chip">${linkId() ? (net.on ? '🟢 Phones linked' : '⚪ Link offline') : 'Not linked yet'}</span></div></div>
     <div class="wrow"><span class="lab">This week Arry is</span><div class="chips"><button class="chip" data-act="weekdad" aria-pressed="${!!weekInfo()?.withDad}">With Dad</button><button class="chip" data-act="weekmom" aria-pressed="${weekInfo() ? !weekInfo().withDad : false}">With Mom</button></div></div>
-    ${save.role === 'dad' ? `<div class="wrow"><span class="lab">Family code</span><div class="chips"><span class="chip">${esc(save.family || '----')}</span></div></div>` : ''}
-    </div></details>`;
-  html += `<div class="statline"><span>Level <b>${level()}</b></span><span>XP <b>${save.xp}</b></span><span>Coins <b>${save.coins}</b></span><span>Makhanda coins <b>${save.found.length}/20</b></span></div>`;
+    <div class="wrow"><span class="lab">Family</span><div class="chips"><button class="chip" data-act="dates">🎂 Birthdays</button><button class="chip" data-act="backup">💾 Save a backup</button><button class="chip" data-act="restore">Restore</button></div></div>
+    ${save.role === 'dad' ? `<div class="wrow"><span class="lab">Codes</span><div class="chips"><span class="chip">Family ${esc(save.family || '----')}</span><span class="chip">Link ${esc(save.link || 'none')}</span></div></div>` : ''}</div>`;
+  }
   $('#menuPanel').innerHTML = html; addSpeakers($('#menuPanel'));
 }
-let keyEntry = [];
+let keyEntry = [], menuTab = 'today';
 function presenceHtml(){
   if (!linkId() || !save.role) return '';
   const o = roleName(otherRole()), m = (ritual().moods || {})[otherRole()], me = MOODS.find(x => x[1] === m);
@@ -3037,7 +3148,7 @@ function presenceHtml(){
   return `<div class="presence${net.partnerOnline ? ' on' : ''}"><span>${net.partnerOnline ? `🟢 ${o} is here!` : `⚪ ${o} isn't in the game right now`}${me ? ` · feeling ${me[0]} ${m.toLowerCase()}` : ''}</span><button class="btn2 heart" data-act="heart" aria-label="Send a thinking-of-you heart">💛 Send a heart</button></div>`;
 }
 function stepBlurb(id){
-  return { stars:'Lie on the lawn, look at the stars and make a wish.', hello:'Pick how you are both feeling today.', question:todaysCard().text, adventure:ritualMission().blurb, gift:'Leave a drawing or note in the letterbox.', challenge:'Pick a tiny real-world challenge for before next time.', goodbye:'A big hug and see you tomorrow.' }[id];
+  return { stars:'Lie on the lawn, look at the stars and make a wish.', hello:'Say how you are feeling, then today\'s chat card.', adventure:'Pick a mission or a mini-game to play together.', goodbye:'Leave a drawing or a voice note, then the big hug.', _hello:'', question:todaysCard().text, adventure:ritualMission().blurb, gift:'Leave a drawing or note in the letterbox.', challenge:'Pick a tiny real-world challenge for before next time.', goodbye:'A big hug and see you tomorrow.' }[id];
 }
 function setupSheet(){
   const needCode = save.role === 'arry';
@@ -3084,6 +3195,7 @@ function startFreePlay(){ playMode = 'free'; startFreeExplore(); toast(`Free pla
 $('#menuPanel').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return; ensureAudio();
   if (b.dataset.key !== undefined){ keyEntry.push(+b.dataset.key); sfx.coin(); if (keyEntry.length === 3){ const ok = dailyKey().every((v, i) => v === keyEntry[i]); keyEntry = []; if (ok){ save.unlock = { date:todayKey(), at:Date.now() }; playMode = 'together'; persist(); sfx.win(); toast('The gate is open! 🌸', true); } else { sfx.miss(); toast('Not quite. Ask Dad again!'); } } openMenu(false); return; }
+  if (b.dataset.tab){ menuTab = b.dataset.tab; sfx.step(); openMenu(state.mode === 'paused'); $('#menuPanel').scrollTop = 0; return; }
   if (b.dataset.ritual){ ritualStep(b.dataset.ritual); return; }
   if (b.dataset.quality){ save.quality = b.dataset.quality; persist(); applyQuality(save.quality === 'auto' ? (coarse ? 'medium' : 'high') : save.quality); openMenu(state.mode === 'paused'); return; }
   if (b.dataset.toggle){ const k = b.dataset.toggle; save[k] = !(save[k] !== false && save[k] !== undefined ? save[k] : (k === 'trail')); if (k === 'trail') save.trail = b.getAttribute('aria-pressed') !== 'true'; persist(); openMenu(state.mode === 'paused'); return; }
@@ -3108,7 +3220,7 @@ $('#menuPanel').addEventListener('click', e => {
   if (a === 'weekdad' || a === 'weekmom'){ setWeek(a === 'weekdad'); openMenu(false); }
   if (a === 'scrapbook') scrapbookSheet();
   if (a === 'garden') gardenView();
-  if (a === 'draw') giftSheet();
+  if (a === 'draw') giftSheet(false);
   if (a === 'journal') openJournal();
   if (a === 'fs') toggleFullscreen();
   if (a === 'maker') openMaker();
@@ -3729,7 +3841,7 @@ const flag = scene.getObjectByName('flag');
 let loopErrors = 0; const fpsMon = { t:0, n:0 };
 let envTuneT = 0;
 function frame(now){
-  netTick(now);
+  netTick(now); updateFlora(.016, now/1000);
   if ((envTuneT -= 1) <= 0){ envTuneT = 120; tuneEnv(); } try { step(now); } catch(e){ if (loopErrors++ < 5) console.error(e); } requestAnimationFrame(frame); }
 function step(now){
   const dt = Math.min(.05, (now - last) / 1000); last = now; const t = now / 1000;
@@ -3752,7 +3864,7 @@ function step(now){
       if (dog.mode === 'follow') followLeader(dog, lead.pos, 2.4, dt, [Math.sin(t*.7)*1.2, Math.cos(t*.7)*1.2]);
       else { dog.moveToward(0, 0, dt); dog.physics(dt); dog.animate(dt); dog.sync(); if (dog.mode === 'lost') { dog.face += dt*.8; } }
     } else if (dog.mode !== 'follow'){ dog.moveToward(0, 0, dt); dog.physics(dt); dog.animate(dt); dog.sync(); }
-    if (state.mode === 'play') { checkMission(dt); updateCoins(dt, t); }
+    if (state.mode === 'play') { checkMission(dt); updateCoins(dt, t); const spd = state.inCar ? Math.abs(car.speed) : Math.hypot(active().vx, active().vz), want = baseFov() + Math.min(9, spd*.75); if (Math.abs(camera.fov - want) > .05){ camera.fov += (want - camera.fov)*Math.min(1, dt*3); camera.updateProjectionMatrix(); } }
     updateCamera(dt);
     const f = activePos(); focusSun(f.x, f.z);
     // HUD bits
