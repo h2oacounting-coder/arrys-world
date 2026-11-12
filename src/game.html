@@ -1765,7 +1765,10 @@ function makeHero(id, outfitId, opt){
 }
 function animHero(rig, phase, amt, air, t){
   const b = rig.b;
-  if (air){ rig.legL.rotation.x = -.7; rig.legR.rotation.x = .3; rig.shinL.rotation.x = 1.0; rig.shinR.rotation.x = .5; rig.armL.rotation.x = -2.5; rig.armR.rotation.x = -2.7; rig.foreL.rotation.x = -.3; rig.foreR.rotation.x = -.3; if (rig.tail) rig.tail.rotation.x = -.5; return; }
+  if (air){ const u = clamp(((rig.vy || 0) + 4)/9, 0, 1); // 1 = rising, 0 = falling
+    rig.legL.rotation.x = lerp(-.2, -.85, u); rig.legR.rotation.x = lerp(.12, .35, u); rig.shinL.rotation.x = lerp(.25, 1.15, u); rig.shinR.rotation.x = lerp(.2, .6, u);
+    rig.armL.rotation.x = lerp(-1.1, -2.6, u); rig.armR.rotation.x = lerp(-1.2, -2.75, u); rig.armL.rotation.z = lerp(-.95, -.25, u); rig.armR.rotation.z = lerp(.95, .25, u);
+    rig.foreL.rotation.x = rig.foreR.rotation.x = -.3; rig.torso.rotation.x = lerp(.16, -.06, u); if (rig.tail) rig.tail.rotation.x = lerp(-1.0, .2, u); return; }
   const sw = Math.sin(phase) * .72 * amt;
   rig.legL.rotation.x = sw; rig.legR.rotation.x = -sw;
   rig.shinL.rotation.x = Math.max(0, Math.sin(phase + 1.3)) * 1.05 * amt + .04;
@@ -1779,6 +1782,7 @@ function animHero(rig, phase, amt, air, t){
   if (rig.tail){ rig.tail.rotation.x = .18 + amt*.25 + Math.sin(phase*2) * .22 * amt; rig.tail.rotation.z = Math.sin(phase) * .35 * amt + Math.sin(t*1.3) * .05; }
 }
 
+const SMOOTH_BONES = [['legL', 'x'], ['legR', 'x'], ['shinL', 'x'], ['shinR', 'x'], ['armL', 'x'], ['armR', 'x'], ['armL', 'z'], ['armR', 'z'], ['foreL', 'x'], ['foreR', 'x'], ['torso', 'x']];
 class Walker {
   constructor(rigObj, opts){ this.g = rigObj.g; this.rig = rigObj.rig; this.pos = new THREE.Vector3(); this.vx = 0; this.vz = 0; this.y = 0; this.vy = 0; this.face = 0; this.phase = 0; this.maxSpeed = opts.speed || 5.5; this.radius = opts.radius || .38; this.kind = opts.kind; world.add(this.g); }
   place(x, z, face = this.face){ this.pos.set(x, 0, z); this.vx = this.vz = 0; this.y = 0; this.vy = 0; this.face = face; this.sync(); }
@@ -1789,8 +1793,8 @@ class Walker {
     if (sp > .3){ const want = Math.atan2(this.vx, this.vz); this.face += wrapAng(want - this.face) * (1 - Math.exp(-17*dt)); }
     return sp;
   }
-  physics(dt){ this.vy -= 20*dt; this.y += this.vy*dt; if (this.y < 0){ if (this.vy < -5){ this.squash = 1; puff(this.pos.x, this.pos.z, 6); if (this === active()) buzz(12); } this.y = 0; this.vy = 0; } if (this.squash > 0) this.squash = Math.max(0, this.squash - dt*5); }
-  sync(){ this.g.position.set(this.pos.x, this.y, this.pos.z); this.g.rotation.y = this.face; const q = this.squash || 0; if (q > 0 || this.g.scale.y !== 1){ const k = Math.sin(q*Math.PI)*.16; this.g.scale.set(1 + k*.6, 1 - k, 1 + k*.6); } }
+  physics(dt){ this.vy -= (this.vy > 0 ? 19 : 31)*dt; this.y += this.vy*dt; if (this.y < 0){ if (this.vy < -5){ this.squash = 1; puff(this.pos.x, this.pos.z, 6); if (this === active()) buzz(12); } this.y = 0; this.vy = 0; } if (this.squash > 0) this.squash = Math.max(0, this.squash - dt*5); }
+  sync(){ this.g.position.set(this.pos.x, this.y, this.pos.z); this.g.rotation.y = this.face; if (this.bank !== undefined) this.g.rotation.z = this.bank; const q = this.squash || 0; if (q > 0 || this.g.scale.y !== 1){ const k = Math.sin(q*Math.PI)*.16; this.g.scale.set(1 + k*.6, 1 - k, 1 + k*.6); } }
   animate(dt){
     const sp = Math.hypot(this.vx, this.vz);
     if (sp > 4.6 && this.y === 0 && this.kind !== 'adult' && this.kind !== 'kid'){ this.dustT = (this.dustT || 0) - dt; if (this.dustT <= 0){ this.dustT = .22; puff(this.pos.x - this.vx*.05, this.pos.z - this.vz*.05, 1); } }
@@ -1801,7 +1805,10 @@ class Walker {
       return;
     }
     this.phase += dt * sp * (this.kind === 'kid' ? 3.6 : 2.7);
-    if (this.rig.hero) animHero(this.rig, this.phase, clamp(sp/4.5, 0, 1), this.y > .15, performance.now()/1000);
+    if (this.rig.hero){ const r = this.rig; r.vy = this.vy; animHero(r, this.phase, clamp(sp/4.5, 0, 1), this.y > .12, performance.now()/1000);
+      const pv = this._pv || (this._pv = SMOOTH_BONES.map(([b, a]) => r[b].rotation[a])), k = 1 - Math.exp(-(this.y > .12 ? 13 : 24)*dt);
+      SMOOTH_BONES.forEach(([b, a], i) => { pv[i] += (r[b].rotation[a] - pv[i])*k; r[b].rotation[a] = pv[i]; });
+      const df = wrapAng(this.face - (this._lf ?? this.face)); this._lf = this.face; this.bank = lerp(this.bank || 0, clamp(-df/Math.max(dt, .008)*.035, -.2, .2)*clamp(sp/3, 0, 1), 1 - Math.exp(-8*dt)); }
     else animHuman(this.rig, this.phase, clamp(sp/4, 0, 1), this.y > .15);
     this.applyPose();
   }
@@ -2145,6 +2152,12 @@ const MISSIONS = [
     { t:'mini', game:'stack', label:'Stack a milkshake 8 scoops high' },
     { t:'pickup', item:'milkshake', name:'Milkshakes', label:'Collect the milkshakes', atPlace:'goat' },
     { t:'goto', place:'park', label:'Find a bench in Jacaranda Park' } ] },
+  { id:'butterflies', title:'Butterfly Hunt', blurb:'The park is full of butterflies. Grab the net and see how many you can catch!', steps:[
+    { t:'goto', place:'park', label:'Walk to Jacaranda Park' },
+    { t:'mini', game:'butterflies', label:'Catch 12 butterflies' } ] },
+  { id:'snakes', title:'Snakes in the Garden!', blurb:'Cheeky snakes are after the braai sausages. Fill the water pistol and shoo them off!', steps:[
+    { t:'goto', place:'garden', label:'Run to the back garden' },
+    { t:'mini', game:'snakes', label:'Shoo 10 snakes away' } ] },
   { id:'cornhole', title:'Cornhole Showdown', blurb:'Set up the cornhole boards in the back garden. Dad versus Arry, four bags each!', steps:[
     { t:'goto', place:'garden', label:'Head to the back garden' },
     { t:'mini', game:'cornhole', label:'Play a game of cornhole' } ] },
@@ -2313,7 +2326,7 @@ async function loadFlora(){
     }
     // small things: grass, flowers, ferns, rocks
     const ok = (x, z, r = 1) => !roadClear(x, z) && !blocked(x, z, r) && Math.hypot(x - OVAL.x, z - OVAL.z) > OVAL.r + 2 && !(x > 50 && x < 90 && z < -64 && z > -114);
-    for (let i = 0; i < 1500; i++){ const a = rnd()*6.28, r = Math.sqrt(rnd())*165, x = WCX + Math.cos(a)*r, z = WCZ + Math.sin(a)*r; if (!ok(x, z, .6)) continue; const k = rnd();
+    for (let i = 0; i < 850; i++){ const a = rnd()*6.28, r = Math.sqrt(rnd())*165, x = WCX + Math.cos(a)*r, z = WCZ + Math.sin(a)*r; if (!ok(x, z, .6)) continue; const k = rnd();
       if (k < .62) put('detail', rnd() < .7 ? 'Grass_Common_Short' : 'Grass_Wispy_Tall', x, z, .55 + rnd()*.4);
       else if (k < .8) put('detail', rnd() < .5 ? 'Flower_3_Group' : 'Flower_4_Group', x, z, .5 + rnd()*.3);
       else if (k < .88) put('detail', rnd() < .5 ? 'Fern_1' : 'Plant_7_Big', x, z, .5 + rnd()*.4);
@@ -2350,7 +2363,7 @@ async function loadFlora(){
 }
 function updateFlora(dt, t){
   windU.value = t; if (!flora.ready) return; flora.t -= dt; if (flora.t > 0) return; flora.t = .35;
-  const low = quality === 'low', rn = low ? 70 : 125, rd = low ? 34 : 62, cx = camera.position.x, cz = camera.position.z;
+  const rn = quality === 'low' ? 52 : quality === 'medium' ? 72 : 92, rd = quality === 'low' ? 26 : quality === 'medium' ? 36 : 46, cx = camera.position.x, cz = camera.position.z;
   for (const c of fcells.values()){ const d = Math.hypot(c.cx - cx, c.cz - cz); c.gNear.visible = d < rn; c.gFar.visible = !c.gNear.visible; c.gDetail.visible = d < rd; }
 }
 
@@ -2785,12 +2798,14 @@ addEventListener('wheel', e => { if (state.mode === 'play'){ cam.zoom = clamp(ca
 touchEl.addEventListener('pointerup', endPointer); touchEl.addEventListener('pointercancel', endPointer);
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase(); input.keys.add(k);
-  if (state.mode === 'play'){ if (k === ' ') { input.jump = true; e.preventDefault(); } if (k === 'e' || k === 'enter') doAction(); if (k === 'f' || k === 'h') emote(); }
+  if (state.mode === 'play'){ if (k === ' ') { if (!e.repeat){ input.jump = true; input.jumpHeld = true; } e.preventDefault(); } if (k === 'e' || k === 'enter') doAction(); if (k === 'f' || k === 'h') emote(); }
   if (cr.active && (k === ' ' || k === 'enter')) { swing(); e.preventDefault(); }
 });
 addEventListener('keyup', e => input.keys.delete(e.key.toLowerCase()));
 addEventListener('blur', () => input.keys.clear());
-$('#jumpBtn').addEventListener('pointerdown', e => { e.stopPropagation(); ensureAudio(); input.jump = true; });
+$('#jumpBtn').addEventListener('pointerdown', e => { e.stopPropagation(); ensureAudio(); input.jump = true; input.jumpHeld = true; });
+for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) $('#jumpBtn').addEventListener(ev, () => { input.jumpHeld = false; });
+addEventListener('keyup', e => { if (e.key === ' ') input.jumpHeld = false; });
 $('#actionBtn').addEventListener('click', () => doAction());
 $('#emoteBtn').addEventListener('click', () => emote());
 $('#pauseBtn').addEventListener('click', () => { menuTab = 'today'; openMenu(true); });
@@ -2859,9 +2874,12 @@ function updateWalker(dt, jx, jy){
   if (mag < .08){ mx = mz = 0; } else { const n = Math.hypot(mx, mz) || 1; mx = mx/n*mag; mz = mz/n*mag; }
   const sprint = mag > .9 || input.keys.has('shift');
   const spd = sprint ? p.maxSpeed * 1.35 : p.maxSpeed * .95;
-  p.moveToward(mx*spd, mz*spd, dt, 15);
-  if (input.jump && p.y <= .001){ p.vy = 6.8; }
-  input.jump = false;
+  const grounded = p.y <= .001;
+  p.moveToward(mx*spd, mz*spd, dt, grounded ? 11 : 4.5);
+  if (input.jump){ input.jumpBuf = .14; input.jump = false; } else input.jumpBuf = Math.max(0, (input.jumpBuf || 0) - dt);
+  p.coyote = grounded ? .1 : Math.max(0, (p.coyote || 0) - dt);
+  if (input.jumpBuf > 0 && p.coyote > 0){ p.vy = 7.7; p.y = Math.max(p.y, .002); p.coyote = 0; input.jumpBuf = 0; p.squash = .5; tone(420, .07, 'sine', .05); }
+  if (p.vy > 2.5 && !input.jumpHeld) p.vy -= 26*dt;
   p.physics(dt); p.animate(dt); p.sync();
 }
 function followLeader(w, leader, gap, dt, behind){
@@ -3063,7 +3081,7 @@ const HEART_SVG = '<svg viewBox="-1.1 -0.7 2.2 1.8" aria-hidden="true"><path tra
 const STAR_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z" fill="#ffc23d" stroke="#8a5a00" stroke-width="1.2" stroke-linejoin="round"/></svg>';
 const playedToday = id => save.journal.some(j => j.date === todayKey() && j.id === id);
 function esc(s){ return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])); }
-const MINI_LIST = [['cornhole', 'Cornhole', 'Back garden'], ['cricket', 'Cricket nets', 'The oval'], ['rugby', 'Rugby kicks', 'Kingswood'], ['braai', 'Braai master', "Dad's stoep"], ['fetch', 'Fetch!', 'The oval'], ['stack', 'Milkshake stack', 'The Grazing Goat']];
+const MINI_LIST = [['cornhole', 'Cornhole', 'Back garden'], ['cricket', 'Cricket nets', 'The oval'], ['rugby', 'Rugby kicks', 'Kingswood'], ['braai', 'Braai master', "Dad's stoep"], ['fetch', 'Fetch!', 'The oval'], ['stack', 'Milkshake stack', 'The Grazing Goat'], ['butterflies', 'Butterfly catch', 'Jacaranda Park'], ['snakes', 'Snake splash', 'Back garden']];
 function miniGrid(){ return `<div class="sect"><h3>Mini-games</h3><div class="mlist">${MINI_LIST.map(([k, l, w]) => `<button class="mcard" data-mini="${k}"><b>${l}</b><span>${w} · Best ${(save.best || {})[k] || 0}</span></button>`).join('')}</div></div>`; }
 function openMenu(paused){
   state.mode = paused ? 'paused' : 'menu';
@@ -3780,6 +3798,93 @@ const MINIS = {
   },
 
   /* ---- Milkshake stack at The Grazing Goat ---- */
+  butterflies: {
+    title:'Butterfly Catch', tip:'Tap the butterflies to catch them in your net. Gold ones are worth 3!', target:12,
+    init(st){
+      const cx = -70, cz = 45; st.c = { x:cx, z:cz }; st.catcher = active(); st.pal = buddy();
+      stillHero(st.catcher, cx, cz + 2.6, Math.PI); stillHero(st.pal, cx + 2.4, cz + 3.5, Math.PI + .3); dog.mode = 'game'; dog.place(cx - 2.2, cz + 3.2, Math.PI);
+      st.bfs = []; st.hits = []; st.time = 45; st.pts = 0;
+      const net = new THREE.Group(); mesh(new THREE.TorusGeometry(.32, .025, 6, 20), mat('#f4f4f0'), net, 0, 0, 0, false); const bag = mesh(new THREE.SphereGeometry(.31, 12, 8, 0, Math.PI*2, Math.PI/2, Math.PI/2), new THREE.MeshStandardMaterial({ color:'#ffffff', transparent:true, opacity:.45, side:THREE.DoubleSide, roughness:1 }), net, 0, 0, 0, false); bag.rotation.x = Math.PI/2; bag.scale.z = 1.5;
+      mesh(new THREE.CylinderGeometry(.02, .02, 1.1, 6), mat('#8b5a34'), net, 0, -.87, 0, false); st.props.add(net); st.net = net; st.netHome = new THREE.Vector3(cx + .45, 1.5, cz + 2.3); net.position.copy(st.netHome); st.netT = 0; st.netTo = new THREE.Vector3();
+      mgCam(cx, 3.3, cz + 9, cx, 1.6, cz - 1);
+    },
+    spawn(st){
+      const gold = Math.random() < .14, col = gold ? '#ffd23a' : pick(['#ff7ab0', '#7ad0ff', '#ff9a3a', '#b48aff', '#8ee08a', '#ff5a6a']);
+      const g = new THREE.Group(), wm = new THREE.MeshStandardMaterial({ color:col, side:THREE.DoubleSide, roughness:.6, emissive:gold ? '#a06a00' : '#000000', emissiveIntensity:gold ? .6 : 0 });
+      const wg = new THREE.PlaneGeometry(.3, .36); wg.translate(.15, 0, 0); const wl = new THREE.Mesh(wg, wm), wr = new THREE.Mesh(wg, wm); wr.scale.x = -1; wl.rotation.x = wr.rotation.x = -Math.PI/2; g.add(wl, wr);
+      mesh(new THREE.CapsuleGeometry(.03, .22, 3, 6), mat('#2a2018'), g, 0, 0, 0, false).rotation.x = Math.PI/2;
+      const hit = new THREE.Mesh(new THREE.SphereGeometry(.62, 8, 6), new THREE.MeshBasicMaterial({ transparent:true, opacity:0, depthWrite:false })); g.add(hit);
+      const c = st.c, bf = { g, wl, wr, hit, gold, ph:Math.random()*6, sp:1.3 + Math.random()*1.2 + (45 - st.time)*.03, caught:0 }; hit.userData.bf = bf;
+      g.position.set(c.x + (Math.random() < .5 ? -9 : 9), 1 + Math.random()*2, c.z - 1 - Math.random()*4); if (gold) g.scale.setScalar(1.25);
+      this.retarget(st, bf); st.props.add(g); st.bfs.push(bf); st.hits.push(hit);
+    },
+    retarget(st, bf){ bf.tx = st.c.x + (Math.random() - .5)*13; bf.ty = .9 + Math.random()*2.3; bf.tz = st.c.z - 5 + Math.random()*5.5; },
+    hud: st => `Caught <b>${st.pts}</b> &nbsp; Time <b>${Math.ceil(st.time)}</b>`,
+    score: st => st.pts, result: (st, s) => `${s} butterflies!`, winText:'What a collection. They all flew home happy!',
+    down(st, x, y){
+      const o = pickAt(x, y, st.hits); if (!o){ tone(240, .06, 'sine', .05); return; }
+      const bf = o.userData.bf; st.hits.splice(st.hits.indexOf(o), 1); bf.caught = .001; st.pts += bf.gold ? 3 : 1; sfx.coin(); buzz(10);
+      st.netTo.copy(bf.g.position); st.netT = .45; sparkle(bf.g.position.x, bf.g.position.y, bf.g.position.z);
+      st.catcher.face = Math.atan2(bf.g.position.x - st.catcher.pos.x, bf.g.position.z - st.catcher.pos.z); st.catcher.pose = { type:'wave', until:performance.now()/1000 + .5 };
+      if (bf.gold){ mgMsg('Gold one! +3', .8); st.pal.pose = { type:'cheer', until:performance.now()/1000 + 1 }; }
+    },
+    update(st, dt, t){
+      idle(st.catcher, dt); idle(st.pal, dt); dog.vx = dog.vz = 0; dog.animate(dt); dog.sync();
+      if (st.over) return;
+      st.time -= dt; if (st.time <= 0){ st.time = 0; endMini(); return; }
+      if (st.bfs.length < 7 && Math.random() < dt*2.2) this.spawn(st);
+      if (st.netT > 0){ st.netT -= dt; const k = Math.sin(clamp(st.netT/.45, 0, 1)*Math.PI); st.net.position.lerpVectors(st.netHome, st.netTo, k); st.net.rotation.z = k*1.2; } else st.net.position.copy(st.netHome);
+      for (let i = st.bfs.length - 1; i >= 0; i--){ const b = st.bfs[i], p = b.g.position;
+        if (b.caught){ b.caught += dt; b.g.scale.multiplyScalar(Math.max(0, 1 - dt*6)); p.lerp(st.net.position, dt*8); if (b.caught > .4){ st.props.remove(b.g); st.bfs.splice(i, 1); } continue; }
+        const dx = b.tx - p.x, dy = b.ty - p.y, dz = b.tz - p.z, d = Math.hypot(dx, dy, dz); if (d < .4) this.retarget(st, b);
+        else { p.x += dx/d*b.sp*dt; p.y += dy/d*b.sp*dt + Math.sin(t*7 + b.ph)*.012; p.z += dz/d*b.sp*dt; b.g.rotation.y = Math.atan2(dx, dz); }
+        const f = Math.sin(t*18 + b.ph)*.9; b.wl.rotation.y = -f; b.wr.rotation.y = f; }
+    },
+  },
+  snakes: {
+    title:'Snake Splash', tip:'Tap the snakes to squirt them with the water pistol before they pinch the sausages!', target:10,
+    init(st){
+      const cx = 12, cz = 60; st.c = { x:cx, z:cz }; st.hero = active(); st.pal = buddy();
+      stillHero(st.hero, cx - .9, cz + 1.3, Math.PI); stillHero(st.pal, cx + 1.1, cz + 1.4, Math.PI); dog.mode = 'game'; dog.place(cx + 2.2, cz + .8, Math.PI);
+      box(st.props, 2.2, .04, 1.6, '#e8443a', cx, .02, cz, { cast:false }); for (let i = 0; i < 4; i++) box(st.props, .5, .045, 1.6, '#ffffff', cx - .82 + i*.55, .02, cz, { cast:false });
+      box(st.props, .5, .3, .36, '#b9824a', cx - .6, .04, cz - .2, { detail:'wood', ao:false });
+      st.sausages = []; for (let i = 0; i < 3; i++){ const sg = mesh(new THREE.CapsuleGeometry(.05, .26, 4, 8), mat('#b5532e', { rough:.5 }), st.props, cx + .1 + i*.22, .1, cz + .1, false); sg.rotation.z = Math.PI/2; sg.rotation.y = .4; st.sausages.push(sg); }
+      st.jet = mesh(new THREE.CylinderGeometry(.03, .05, 1, 6), new THREE.MeshBasicMaterial({ color:'#8fd8ff', transparent:true, opacity:.85 }), st.props, 0, -5, 0, false); st.jetT = 0;
+      st.snakes = []; st.hits = []; st.time = 40; st.pts = 0; st.lives = 3; st.spawnT = 1;
+      mgCam(cx, 6.2, cz + 8.5, cx, .2, cz - 3.5);
+    },
+    spawn(st){
+      const a = Math.PI + (Math.random() - .5)*2.6, r = 9 + Math.random()*2, g = new THREE.Group(), col = pick(['#5aa84a', '#7ab83a', '#3f9a6a', '#c9a23a']);
+      const segs = []; for (let i = 0; i < 11; i++){ const rr = i === 0 ? .17 : .14 - i*.009; const m = mesh(new THREE.SphereGeometry(rr, 10, 8), mat(i % 2 ? col : '#f2e6a0', { rough:.5 }), g, 0, rr, 0); segs.push(m); }
+      for (const sx of [-1, 1]){ mesh(new THREE.SphereGeometry(.045, 8, 6), mat('#ffffff'), segs[0], sx*.08, .09, .1, false); mesh(new THREE.SphereGeometry(.022, 6, 5), mat('#111111'), segs[0], sx*.08, .1, .135, false); }
+      mesh(new THREE.BoxGeometry(.02, .01, .16), mat('#e33b5c'), segs[0], 0, -.02, .22, false);
+      const hit = new THREE.Mesh(new THREE.SphereGeometry(.75, 8, 6), new THREE.MeshBasicMaterial({ transparent:true, opacity:0, depthWrite:false })); st.props.add(hit);
+      const sn = { g, segs, hit, a, d:r, sp:.9 + Math.random()*.6 + (40 - st.time)*.03, flee:false, ph:Math.random()*6 }; hit.userData.sn = sn; st.props.add(g); st.snakes.push(sn); st.hits.push(hit);
+    },
+    hud: st => `Shooed <b>${st.pts}</b> &nbsp; Sausages <b>${'🌭'.repeat(st.lives) || 'none!'}</b> &nbsp; Time <b>${Math.ceil(st.time)}</b>`,
+    score: st => st.pts, result: (st, s) => st.lives > 0 ? `${s} snakes shooed, sausages saved!` : `${s} snakes shooed, but they got the sausages!`, winText:'The braai is safe. Snakes: 0, Team Arry: lots!',
+    down(st, x, y){
+      const o = pickAt(x, y, st.hits); const h = st.hero, hand = new THREE.Vector3(h.pos.x, activeId === 'arry' ? .75 : 1.15, h.pos.z - .3);
+      if (!o){ tone(300, .05, 'sine', .05); return; }
+      const sn = o.userData.sn; if (sn.flee) return; sn.flee = true; sn.sp = 4.2; st.pts++; tone(880, .09, 'triangle', .12); tone(660, .12, 'sine', .08, .05); buzz(10);
+      const tp = o.position; h.face = Math.atan2(tp.x - h.pos.x, tp.z - h.pos.z); h.pose = { type:'wave', until:performance.now()/1000 + .35 };
+      const mid = hand.clone().add(tp).multiplyScalar(.5), len = hand.distanceTo(tp); st.jet.position.copy(mid); st.jet.scale.set(1, len, 1); st.jet.lookAt(tp); st.jet.rotateX(Math.PI/2); st.jetT = .16;
+      for (let i = 0; i < 2; i++) puff(tp.x, tp.z, 3); sparkle(tp.x, .3, tp.z);
+    },
+    update(st, dt, t){
+      idle(st.hero, dt); idle(st.pal, dt); dog.vx = dog.vz = 0; dog.animate(dt); dog.sync();
+      if (st.jetT > 0){ st.jetT -= dt; if (st.jetT <= 0) st.jet.position.y = -5; }
+      if (st.over) return;
+      st.time -= dt; if (st.time <= 0){ st.time = 0; endMini(); return; }
+      st.spawnT -= dt; if (st.spawnT <= 0 && st.snakes.filter(x => !x.flee).length < 4){ this.spawn(st); st.spawnT = Math.max(.7, 2.3 - (40 - st.time)*.035); }
+      for (let i = st.snakes.length - 1; i >= 0; i--){ const sn = st.snakes[i]; sn.d += (sn.flee ? 1 : -1)*sn.sp*dt; sn.ph += dt*(sn.flee ? 16 : 8);
+        const ux = Math.sin(sn.a), uz = Math.cos(sn.a), px = -uz, pz = ux;
+        sn.segs.forEach((m, k) => { const dd = sn.d + (sn.flee ? -1 : 1)*k*.2, w = Math.sin(sn.ph - k*.7)*.2*Math.min(1, k*.4 + .3); m.position.set(st.c.x + ux*dd + px*w, m.geometry.parameters.radius, st.c.z + uz*dd + pz*w); });
+        const hd = sn.segs[0]; hd.rotation.y = sn.a + (sn.flee ? 0 : Math.PI); sn.hit.position.set(hd.position.x, .3, hd.position.z);
+        if (!sn.flee && sn.d < 1.0){ sn.flee = true; sn.sp = 3.5; st.lives--; const sg = st.sausages.pop(); if (sg) st.props.remove(sg); mgMsg('It pinched a sausage!', .9); sfx.miss(); buzz(40); if (st.lives <= 0){ endMini(); return; } }
+        if (sn.flee && sn.d > 13){ st.props.remove(sn.g); st.props.remove(sn.hit); const hi = st.hits.indexOf(sn.hit); if (hi >= 0) st.hits.splice(hi, 1); st.snakes.splice(i, 1); } }
+    },
+  },
   stack: {
     title:'Milkshake Stack', tip:'Tap to drop each scoop. Line it up with the one below to keep it big!', action:'DROP', target:8,
     init(st){
@@ -3929,7 +4034,7 @@ requestAnimationFrame(frame);
 window.__clayTime = () => { const t0 = performance.now(); clayCache.clear(); makeHero('dad', 'casual'); const t1 = performance.now(); makeHero('arry', 'pink'); return [Math.round(t1 - t0), Math.round(performance.now() - t1)]; };
 window.__set = (d, a) => { setOutfit('dad', d); setOutfit('arry', a); };
 window.__dog = () => ({ x:dog.pos.x, z:dog.pos.z, mode:dog.mode });
-window.__dbg = { mg:() => mg, winMini:() => { mg.st.forceScore = mg.g.target; endMini(); }, cr:() => cr, renderer, scene, completeStep:() => completeStep(), endCricket:() => { cr.active = false; cr.runs = 20; endCricket(); } };
+window.__dbg = { camera, mg:() => mg, winMini:() => { mg.st.forceScore = mg.g.target; endMini(); }, cr:() => cr, renderer, scene, completeStep:() => completeStep(), endCricket:() => { cr.active = false; cr.runs = 20; endCricket(); } };
 window.__npcs = () => npcs.map(n => [n.pos.x, n.pos.z]);
 window.__aw = { buddy, net, netStart, extra:[BIG_FRIDAY, BDAY_MISSION, XMAS_MISSION], state, MISSIONS, startMission, active, car, enterCar, exitCar, PLACES, cam, input, openCricket, ms:() => ms };
 </script>
