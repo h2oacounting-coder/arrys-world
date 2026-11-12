@@ -642,7 +642,8 @@ function fcell(x, z){ const i = Math.floor(x/FCELL), j = Math.floor(z/FCELL), k 
   if (!c){ c = { cx:(i + .5)*FCELL, cz:(j + .5)*FCELL, trees:[], near:{}, detail:{}, gNear:new THREE.Group(), gDetail:new THREE.Group(), gFar:new THREE.Group(), gKit:new THREE.Group(), gHouseFar:new THREE.Group() };
     c.gNear.visible = c.gDetail.visible = c.gKit.visible = false; scene.add(c.gNear, c.gDetail, c.gFar, c.gKit, c.gHouseFar); fcells.set(k, c); } return c; }
 // Places beyond the town are their own little maps, far away on the same grid and reached through a gate
-const ZONES = { town:{ name:'Makhanda', cx:WCX, cz:WCZ, r:BOUND }, gardens:{ name:'Botanical Gardens', cx:3000, cz:0, r:58 }, kingswood:{ name:'Kingswood College', cx:6000, cz:0, r:64 }, monument:{ name:'The Monument School of Magic', cx:9000, cz:0, r:60 } };
+const ZONES = { town:{ name:'Makhanda', cx:WCX, cz:WCZ, r:BOUND }, gardens:{ name:'Botanical Gardens', cx:3000, cz:0, r:58 }, kingswood:{ name:'Kingswood College', cx:6000, cz:0, r:64 }, monument:{ name:'The Monument School of Magic', cx:9000, cz:0, r:60 },
+  home:{ name:"Dad's House", cx:12000, cz:0, r:13, inside:true }, goatin:{ name:'The Grazing Goat', cx:12200, cz:0, r:11, inside:true }, shop:{ name:"Graham's Grocer", cx:12400, cz:0, r:11, inside:true } };
 function zoneAt(p){ let best = 'town', bd = 1e12; for (const [k, z] of Object.entries(ZONES)){ const d = Math.hypot(p.x - z.cx, p.z - z.cz); if (d < bd){ bd = d; best = k; } } return best; }
 function solidWorld(cx, cz, w, d){ colliders.push({ x0:cx-w/2, x1:cx+w/2, z0:cz-d/2, z1:cz+d/2 }); }
 function toWorld(g, lx, lz){ const c = Math.cos(g.rotation.y), s = Math.sin(g.rotation.y); return [g.position.x + lx*c + lz*s, g.position.z - lx*s + lz*c]; }
@@ -2428,8 +2429,11 @@ function updateFlora(dt, t){
    Gates and places beyond the town
    ========================================================= */
 const portals = []; let portalCool = 0;
-function addPortal(zone, x, z, face, label, toZone, tx, tz, tface){
+function addPortal(zone, x, z, face, label, toZone, tx, tz, tface, door){
   const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = face; scene.add(g);
+  if (door){ const matG = mesh(new THREE.PlaneGeometry(1.5, 1), new THREE.MeshBasicMaterial({ color:'#ffe9a0', transparent:true, opacity:.5, depthWrite:false }), g, 0, .06, 0, false); matG.rotation.x = -Math.PI/2;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map:textTexture(label, { w:512, h:110, bg:'#2a2030', fg:'#fff4d0', border:'#ffd35a', bw:5, font:'800 50px "Baloo 2", Arial, sans-serif', dy:2 }), })); const small = zone !== 'town'; sp.scale.set(small ? 1.2 : 1.9, small ? .26 : .41, 1); sp.position.y = small ? .5 : 2.5; g.add(sp);
+    portals.push({ zone, x, z, toZone, tx, tz, tface, glow:matG, label, r:.85 }); return; }
   for (const sx of [-1, 1]){ box(g, .6, 3.3, .6, '#b9b2a4', sx*1.5, 0, 0, { detail:'stone' }); mesh(new THREE.SphereGeometry(.28, 12, 8), mat('#ffd35a', { rough:.3, metal:.5 }), g, sx*1.5, 3.55, 0); }
   const arch = mesh(new THREE.TorusGeometry(1.5, .16, 8, 20, Math.PI), mat('#3d6b45', { rough:.5, metal:.3 }), g, 0, 3.2, 0);
   const sign = mesh(new THREE.PlaneGeometry(2.9, .62), new THREE.MeshBasicMaterial({ map:textTexture(label, { w:512, h:110, bg:'#2f5b45', fg:'#fff4d0', border:'#ffd35a', bw:5, font:'800 52px "Baloo 2", Arial, sans-serif', dy:2 }), side:THREE.DoubleSide }), g, 0, 2.75, .02, false);
@@ -2452,7 +2456,8 @@ function updatePortals(dt, t){
   portalCool = Math.max(0, portalCool - dt);
   const p = active().pos, zn = zoneAt(p);
   for (const o of portals){ o.glow.material.opacity = .22 + Math.sin(t*3)*.08; if (o.zone !== zn || portalCool > 0 || state.mode !== 'play') continue;
-    const d = Math.hypot(p.x - o.x, p.z - o.z); if (d < 1.25 && !state.inCar) travel(o.toZone, o.tx, o.tz, o.tface); else if (d < 4 && state.inCar && !o.told){ o.told = true; toast('Hop out of the bakkie to walk through the gate'); } }
+    const d = Math.hypot(p.x - o.x, p.z - o.z); if (d < (o.r || 1.25) && !state.inCar){ if (o.inside) goInside(o.toZone); else travel(o.toZone, o.tx, o.tz, o.tface); } else if (d < 4 && state.inCar && !o.told){ o.told = true; toast('Hop out of the bakkie to walk through the gate'); } }
+  if (zoneLife.tv) zoneLife.tv.material.color.setHSL(zoneLife.tvOn ? (t*.3) % 1 : .6, zoneLife.tvOn ? .7 : .2, zoneLife.tvOn ? .55 : .12);
   if (zoneLife.bellT > 0){ zoneLife.bellT -= dt; zoneLife.bell.rotation.z = Math.sin(t*26)*.5*zoneLife.bellT; }
   updateZoneLife(dt, t, zn);
 }
@@ -2463,6 +2468,7 @@ function buildZone(zid){
   if (zid === 'gardens') buildGardens(Z);
   if (zid === 'kingswood') buildKingswood(Z);
   if (zid === 'monument') buildMonument(Z);
+  if (Z.inside) buildInside(zid, Z);
 }
 function buildGardens(Z){
   const ox = Z.cx, oz = Z.cz, G = new THREE.Group(); scene.add(G);
@@ -2635,6 +2641,66 @@ function updateMonumentLife(dt, t){
   for (const b of zoneLife.bubbles || []){ const k = (t*.5 + b.ph) % 1; b.b.position.set(b.x + Math.sin(k*9 + b.ph)*.15, .9 + k*1.3, b.z); b.b.material.opacity = .85*(1 - k); }
   for (const o of zoneLife.owls || []){ if (o.t > 0){ o.t -= dt; const k = 1 - o.t/4, r = 6; o.o.position.set(o.home.x + Math.sin(k*6.28)*r - 0, o.home.y + Math.sin(k*3.14)*4, o.home.z + (1 - Math.cos(k*6.28))*r - 0); o.o.rotation.y = k*6.28 + 1.57; if (o.t <= 0){ o.o.position.copy(o.home); o.o.rotation.y = o.a; } } else o.o.rotation.y = o.a + Math.sin(t*.8 + o.a)*.5; }
 }
+
+/* ---------- going inside: each interior is a small roofless room behind a door ---------- */
+const DOOR_AT = { home:[10, 38.8, Math.PI], goatin:[-7.6, 0, -Math.PI/2], shop:[7.6, -61, Math.PI/2] };   // town-side door: x, z, the way you face walking in
+function buildInside(zid, Z){
+  const ox = Z.cx, oz = Z.cz, G = new THREE.Group(), PI = Math.PI; scene.add(G);
+  const dark = mesh(new THREE.CircleGeometry(40, 24), new THREE.MeshBasicMaterial({ color:'#2a2030' }), G, ox, -.02, oz, false); dark.rotation.x = -PI/2;
+  const room = (x, z, w, d, o = {}) => { if (kit) kit.room(Object.assign({ x, z, w, d }, o)); else box(G, w, .06, d, '#d9b98a', x, 0, z, { cast:false });
+    const gap = (side, i) => (o.gaps || []).some(g => g[0] === side && g[1] === i);
+    for (let i = 0; i < w/2; i++){ const lx = x - w/2 + 1 + 2*i; if (!gap('n', i)) solidWorld(lx, z - d/2 - .1, 2, .4); if (o.south !== false && !gap('s', i)) solidWorld(lx, z + d/2 + .1, 2, .4); }
+    for (let k = 0; k < d/2; k++){ const lz = z - d/2 + 1 + 2*k; if (!gap('w', k)) solidWorld(x - w/2 - .1, lz, .4, 2); if (!gap('e', k)) solidWorld(x + w/2 + .1, lz, .4, 2); } };
+  const solidBox = (w, h, d, col, x, y, z, o) => { const m = box(G, w, h, d, col, x, y, z, o); solidWorld(x, z, w, d); return m; };
+  const exitTo = DOOR_AT[zid], back = [exitTo[0] - Math.sin(exitTo[2])*2.6, exitTo[1] - Math.cos(exitTo[2])*2.6];
+  if (zid === 'home'){
+    room(ox, oz, 10, 8, { tint:'#fff3e0', floor:'Floor_WoodLight', gaps:[['e', 1], ['s', 2]] }); room(ox + 8, oz - 1, 6, 6, { tint:'#ffe3ef', floor:'Floor_WoodDark', gaps:[['w', 1]] });
+    // lounge
+    solidBox(3.2, .5, 1.1, '#3d6fb5', ox - 2.6, 0, oz + 1.6); box(G, 3.2, .7, .3, '#345f9c', ox - 2.6, .5, oz + 2.0); for (const sx of [-1.45, 1.45]) box(G, .3, .75, 1.1, '#345f9c', ox - 2.6 + sx, 0, oz + 1.6);
+    benches.push({ x:ox - 2.6, z:oz + 1.0, face:PI });
+    solidBox(2.2, .5, .5, '#5b3a22', ox - 2.6, 0, oz - 3.4, { detail:'wood', ao:false }); box(G, 1.9, 1.1, .08, '#111418', ox - 2.6, .6, oz - 3.4); zoneLife.tv = mesh(new THREE.PlaneGeometry(1.75, .95), new THREE.MeshBasicMaterial({ color:'#3d8bff' }), G, ox - 2.6, 1.15, oz - 3.35, false);
+    box(G, 2.6, .02, 1.8, '#e8443a', ox - 2.6, .04, oz - .8, { cast:false });
+    // kitchen
+    solidBox(3.4, .95, .7, '#f4efe6', ox + 2.9, 0, oz - 3.5); box(G, 3.5, .06, .8, '#3a3a3a', ox + 2.9, .95, oz - 3.5); solidBox(.9, 1.9, .8, '#dfe6ea', ox + .5, 0, oz - 3.5, { metal:.4, rough:.3 });
+    solidBox(1.6, .78, 1.0, '#a06d48', ox + 2.4, 0, oz + .6, { detail:'wood', ao:false }); for (const sx of [-1.1, 1.1]) box(G, .45, .46, .45, '#8b5a34', ox + 2.4 + sx, 0, oz + .6);
+    spots.push({ x:ox + .5, z:oz - 2.5, r:1.3, label:'SNACK', fn(){ const f = pick(["Dad's famous toasted cheese", 'A big slice of watermelon', 'Milk and a rusk', 'Leftover braai chops', 'An ice lolly']); toast(`${f}. Yum! 😋`, true); sfx.coin(); active().pose = { type:'cheer', until:performance.now()/1000 + 1 }; } });
+    spots.push({ x:ox - 2.6, z:oz - 2.3, r:1.3, label:'TV', fn(){ zoneLife.tvOn = !zoneLife.tvOn; toast(zoneLife.tvOn ? pick(['Cricket is on! Proteas are batting. 🏏', 'Cartoons! 📺', 'A nature show about meerkats. 🐾']) : 'TV off'); tone(700, .05, 'square', .04); } });
+    // Arry's room
+    const ax = ox + 8, az = oz - 1;
+    solidBox(1.3, .5, 2.2, '#ff8fc0', ax + 2.1, 0, az - 1.6); box(G, 1.3, .16, .6, '#ffffff', ax + 2.1, .5, az - 2.4); box(G, 1.4, 1.0, .12, '#f4efe6', ax + 2.1, 0, az - 2.8);
+    solidBox(1.3, .7, .6, '#f4efe6', ax - 1.6, 0, az - 2.5); box(G, .4, .5, .4, '#ffd25a', ax - 1.6, 0, az - 1.8);
+    solidBox(.9, .5, .6, '#b48aff', ax - 2.2, 0, az + 2.2); solidBox(1.1, 2.0, .6, '#e9c9a0', ax + 2.2, 0, az + 2.2, { detail:'wood', ao:false });
+    const frame = mesh(new THREE.PlaneGeometry(1.5, 1), new THREE.MeshBasicMaterial({ color:'#fffaf0' }), G, ax, 1.9, az - 2.86, false); box(G, 1.66, 1.16, .05, '#ffd35a', ax, 1.32, az - 2.9, { cast:false });
+    const pic = (save.scrapbook || []).find(e => e.img); if (pic) new THREE.TextureLoader().load(pic.img, t => { t.colorSpace = THREE.SRGBColorSpace; frame.material.map = t; frame.material.color.set('#ffffff'); frame.material.needsUpdate = true; });
+    spots.push({ x:ax - 1.6, z:az - 1.6, r:1.2, label:'DRAW', fn(){ giftSheet(false); } });
+    spots.push({ x:ax + 1.3, z:az - 1.6, r:1.2, label:'NAP', fn(){ const p = active(); p.pose = { type:'sit', seat:.5 }; toast('Zzz... a quick nap. All rested! 😴', true); tone(330, .5, 'sine', .05); } });
+    spots.push({ x:ax + 2.2, z:az + 1.3, r:1.3, label:'DRESS UP', fn(){ const id = activeId, ks = Object.keys(OUTFITS[id]), nx = ks[(ks.indexOf(save.outfit[id]) + 1) % ks.length]; save.outfit[id] = nx; persist(); const pos = active().pos.clone(), f = active().face; setOutfit(id, nx); active().place(pos.x, pos.z, f); sparkle(pos.x, 1, pos.z); sfx.coin(); toast(OUTFITS[id][nx].label + '!', true); } });
+    spots.push({ x:ax - 2.2, z:az + 1.3, r:1.2, label:'TOYS', fn(){ const p = active().pos; for (let i = 0; i < 3; i++) setTimeout(() => sparkle(p.x, .8, p.z), i*160); toast(pick(['Tea party with the teddies! 🧸', 'Lego tower: 20 bricks high! 🧱', 'Puzzle time: found the corner piece! 🧩']), true); dog.vy = 4.5; sfx.woof(); } });
+    addPortal(zid, ox, oz + 4.6, PI, 'Outside', 'town', back[0], back[1], exitTo[2] + PI, true); Z.arrive = [ox, oz + 2.9];
+  } else if (zid === 'goatin'){
+    room(ox, oz, 10, 8, { tint:'#ffe9d2', floor:'Floor_WoodDark', gaps:[['s', 2]] });
+    solidBox(6, 1.05, .8, '#8a5a36', ox, 0, oz - 2.6, { detail:'wood', ao:false }); box(G, 6.2, .06, 1, '#efe6d6', ox, 1.05, oz - 2.6);
+    for (let i = 0; i < 4; i++){ mesh(new THREE.CylinderGeometry(.13, .1, .32, 14), mat(['#ffb3cf', '#c9a27a', '#fff3c0', '#b8e0b0'][i], { rough:.4 }), G, ox - 2.2 + i*1.4, 1.26, oz - 2.6, false); mesh(new THREE.SphereGeometry(.11, 10, 8), mat('#ffffff'), G, ox - 2.2 + i*1.4, 1.46, oz - 2.6, false); }
+    box(G, 3.2, 1.2, .08, '#2f5d48', ox, 1.7, oz - 3.86, { cast:false }); mesh(new THREE.PlaneGeometry(3, 1), new THREE.MeshBasicMaterial({ map:textTexture('Milkshakes!', { w:512, h:170, bg:'#2f5d48', fg:'#ffffff', font:'700 84px "Baloo 2", Arial, sans-serif', dy:4 }) }), G, ox, 2.3, oz - 3.8, false);
+    for (const [tx, tz] of [[-3, 1], [3, 1], [-3, 2.9], [3, 2.9]]){ mesh(new THREE.CylinderGeometry(.6, .6, .06, 16), mat('#efe6d6'), G, ox + tx, .74, oz + tz); mesh(new THREE.CylinderGeometry(.06, .2, .74, 8), mat('#3a3a3a'), G, ox + tx, .37, oz + tz); circles.push({ x:ox + tx, z:oz + tz, r:.6 }); for (const sx of [-.95, .95]){ box(G, .4, .46, .4, '#e8443a', ox + tx + sx, 0, oz + tz); benches.push({ x:ox + tx + sx, z:oz + tz, face:sx > 0 ? -PI/2 : PI/2 }); } }
+    spots.push({ x:ox, z:oz - 1.4, r:1.6, label:'MAKE SHAKE', fn(){ openMini('stack', 'arcade', 'play'); } });
+    addPortal(zid, ox, oz + 4.6, PI, 'Outside', 'town', back[0], back[1], exitTo[2] + PI, true); Z.arrive = [ox, oz + 2.9];
+  } else {
+    room(ox, oz, 10, 8, { tint:'#eaf1fb', floor:'Floor_RedBrick', gaps:[['s', 2]] });
+    const goods = ['🍎', '🍞', '🥛', '🧀', '🍌', '🥕', '🍫', '🧃', '🥚', '🍊'];
+    for (const sx of [-3, 0, 3]){ solidBox(2.2, 1.7, .6, '#b9824a', ox + sx, 0, oz - 3.3, { detail:'wood', ao:false }); for (let r2 = 0; r2 < 2; r2++) for (let c = 0; c < 4; c++) mesh(new THREE.BoxGeometry(.3, .34, .3), mat(pick(['#e8443a', '#ffd25a', '#5ac06a', '#3d8bff', '#ff9a3a', '#f4f4f0'])), G, ox + sx - .75 + c*.5, .5 + r2*.75, oz - 3.05, false); }
+    solidBox(.6, 1.5, 3, '#b9824a', ox - 4.4, 0, oz + .4, { detail:'wood', ao:false }); solidBox(2.4, 1, .8, '#8a5a36', ox + 3, 0, oz + 1.6, { detail:'wood', ao:false }); box(G, .5, .4, .4, '#3a3a3a', ox + 3.4, 1, oz + 1.6);
+    solidBox(1.4, .6, 1.4, '#c9a27a', ox - 1, 0, oz + .6); for (let i = 0; i < 7; i++) mesh(new THREE.SphereGeometry(.16, 10, 8), mat(pick(['#ff9a3a', '#e8443a', '#ffd25a', '#7ad07a'])), G, ox - 1.4 + (i % 3)*.4, .76, oz + .3 + Math.floor(i/3)*.3, false);
+    spots.push({ x:ox + 3, z:oz + 2.7, r:1.5, label:'SHOP', fn(){ const want = Array.from({ length:3 }, () => goods[Math.floor(Math.random()*goods.length)]); let n = 0;
+      const ask = () => { const right = want[n], opts = new Set([right]); while (opts.size < 4) opts.add(goods[Math.floor(Math.random()*goods.length)]); const list = [...opts].sort(() => Math.random() - .5);
+        showSheet(`<div class="eyebrow">Shopping list · ${n + 1} of 3</div><h2>Dad's list says: ${want.map((w, i) => i < n ? '✅' : i === n ? w : '❓').join(' ')}</h2><p>Which one goes in the basket next?</p><div class="moods">${list.map(v => `<button class="mood" data-v="${v}"><span>${v}</span></button>`).join('')}</div>`);
+        $('#sheetCard').querySelectorAll('[data-v]').forEach(bt => bt.onclick = () => { if (bt.dataset.v === right){ sfx.coin(); n++; if (n >= 3){ save.xp += 30; save.coins += 2; persist(); updateStats(); showSheet(`<div class="big-done"><h2>Shopping done! 🧺</h2></div><p style="text-align:center">+30 XP and 2 coins change from Mr Graham.</p><div class="row" style="justify-content:center"><button class="play" id="shOk">Thanks!</button></div>`); $('#shOk').onclick = hideSheet; } else ask(); } else { sfx.miss(); bt.style.opacity = .3; } }); };
+      ask(); } });
+    addPortal(zid, ox, oz + 4.6, PI, 'Outside', 'town', back[0], back[1], exitTo[2] + PI, true); Z.arrive = [ox, oz + 2.9];
+  }
+  if (kit) kit.flush(() => G);
+}
+function goInside(zid){ const Z = ZONES[zid]; buildZone(zid); travel(zid, Z.arrive[0], Z.arrive[1], Math.PI); }
 function makeFrog(parent, x, z){
   const g = new THREE.Group(); g.position.set(x, .1, z); parent.add(g); const gm = mat('#6fbf4a', { rough:.5 });
   mesh(new THREE.SphereGeometry(.16, 12, 8), gm, g, 0, .1, 0).scale.set(1, .7, 1.2); for (const sx of [-1, 1]){ mesh(new THREE.SphereGeometry(.055, 8, 6), gm, g, sx*.08, .2, .1, false); mesh(new THREE.SphereGeometry(.028, 6, 5), mat('#111111'), g, sx*.08, .22, .14, false); mesh(new THREE.SphereGeometry(.07, 8, 6), gm, g, sx*.15, .04, -.08, false).scale.set(1, .6, 1.4); }
@@ -2672,6 +2738,8 @@ function goPlace(k){
   if (k === 'kingswood'){ travel('kingswood', ZONES.kingswood.cx, ZONES.kingswood.cz + 55, Math.PI); return; }
   const pl = PLACES[k]; const [x, z] = freeSpot(pl.pos[0] + 1.5, pl.pos[1] + pl.r*.6); travel(zoneAt({ x, z }), x, z, Math.atan2(pl.pos[0] - x, pl.pos[1] - z), true); toast(pl.name, true);
 }
+DOOR_AT.goatin[1] = goatZ;
+for (const [zid, label] of [['home', 'Go inside'], ['goatin', 'Go inside'], ['shop', 'Go inside']]){ let [x, z, f] = DOOR_AT[zid]; for (let i = 0; i < 14 && blocked(x, z, .5); i++){ x -= Math.sin(f)*.3; z -= Math.cos(f)*.3; } DOOR_AT[zid][0] = x; DOOR_AT[zid][1] = z; addPortal('town', x, z, f, label, zid, 0, 0, Math.PI, true); portals[portals.length - 1].inside = true; }
 { for (const c of [[-30, -150], [30, -150], [-40, -128], [40, -128], [-24, -168], [24, -168], [-46, -150]]) if (!blocked(c[0], c[1], 5)){ PLACES.mongate.pos = c; PLACES.mongate.itemAt = [c[0] + 2, c[1] + 2]; break; }
   const [mx2, mz2] = PLACES.mongate.pos; addPortal('town', mx2, mz2, 0, 'The Monument', 'monument', ZONES.monument.cx, ZONES.monument.cz + 51, Math.PI); }
 { for (const c of [[112, -50], [104, -52], [120, -52], [112, -44], [98, -48], [124, -46]]) if (!blocked(c[0], c[1], 5)){ PLACES.kwgate.pos = c; PLACES.kwgate.itemAt = [c[0] + 2, c[1] + 2]; break; }
@@ -3246,7 +3314,8 @@ function updateCamera(dt){
     const p = active(), sp = Math.hypot(p.vx, p.vz);
     if (sp > .8){ const d = wrapAng(behind - cam.yaw); cam.yaw += d * (1 - Math.exp(-2.4*dt*clamp(sp/4, .4, 1.3))); }
   }
-  const dist = (state.inCar ? 10.5 : (activeId === 'arry' ? 5.2 : 6.2)) * cam.zoom * (portrait() ? 1.22 : 1);
+  const indoors = active().pos.x > 11000; if (indoors && cam.pitch < .55) cam.pitch += (.62 - cam.pitch)*Math.min(1, dt*2);
+  const dist = (state.inCar ? 10.5 : (activeId === 'arry' ? 5.2 : 6.2)) * cam.zoom * (portrait() ? 1.22 : 1) * (indoors ? .85 : 1);
   const hd = dist * Math.cos(cam.pitch), vy = dist * Math.sin(cam.pitch);
   let reach = 1;
   for (let f = .12; f <= 1.001; f += .06){ const x = focus.x + Math.sin(cam.yaw)*hd*f, z = focus.z + Math.cos(cam.yaw)*hd*f; if (blocked(x, z, .35) || trunkAt(x, z)){ reach = Math.max(.12, f - .08); break; } }
@@ -4258,7 +4327,9 @@ let last = performance.now(), menuAng = 0;
 const flag = scene.getObjectByName('flag');
 let loopErrors = 0; const fpsMon = { t:0, n:0 };
 let envTuneT = 0;
+let hemiBase = 0;
 function frame(now){
+  if (!hemiBase) hemiBase = hemi.intensity; if (!nightSaved){ const want = active().pos.x > 11000 ? hemiBase + .75 : hemiBase; hemi.intensity += (want - hemi.intensity)*.08; }
   netTick(now); updateFlora(.016, now/1000); updatePortals(.016, now/1000); clouds.position.set(camera.position.x > 1500 ? camera.position.x : 0, 0, camera.position.x > 1500 ? camera.position.z : 0);
   if ((envTuneT -= 1) <= 0){ envTuneT = 120; tuneEnv(); } try { step(now); } catch(e){ if (loopErrors++ < 5) console.error(e); } requestAnimationFrame(frame); }
 function step(now){
@@ -4352,7 +4423,7 @@ requestAnimationFrame(frame);
 window.__clayTime = () => { const t0 = performance.now(); clayCache.clear(); makeHero('dad', 'casual'); const t1 = performance.now(); makeHero('arry', 'pink'); return [Math.round(t1 - t0), Math.round(performance.now() - t1)]; };
 window.__set = (d, a) => { setOutfit('dad', d); setOutfit('arry', a); };
 window.__dog = () => ({ x:dog.pos.x, z:dog.pos.z, mode:dog.mode });
-window.__dbg = { camera, mg:() => mg, winMini:() => { mg.st.forceScore = mg.g.target; endMini(); }, cr:() => cr, renderer, scene, completeStep:() => completeStep(), endCricket:() => { cr.active = false; cr.runs = 20; endCricket(); } };
+window.__dbg = { camera, portals, mg:() => mg, winMini:() => { mg.st.forceScore = mg.g.target; endMini(); }, cr:() => cr, renderer, scene, completeStep:() => completeStep(), endCricket:() => { cr.active = false; cr.runs = 20; endCricket(); } };
 window.__npcs = () => npcs.map(n => [n.pos.x, n.pos.z]);
 window.__aw = { buddy, net, netStart, extra:[BIG_FRIDAY, BDAY_MISSION, XMAS_MISSION], state, MISSIONS, startMission, active, car, enterCar, exitCar, PLACES, cam, input, openCricket, ms:() => ms };
 </script>
