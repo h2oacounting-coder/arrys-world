@@ -1,0 +1,11 @@
+# Wraps the game (kept as one page fragment in src/game.html) into the hosted page.
+import pathlib
+src = pathlib.Path('src/game.html').read_text()
+head = '''<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#1b1420"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Arry's World">
+<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">
+<style>[hidden]{display:none!important}html,body{margin:0;height:100%;overscroll-behavior:none}</style></head><body>'''
+pathlib.Path('index.html').write_text(head + src + '</body></html>')
+print('built', len(src))
