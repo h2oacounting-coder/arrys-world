@@ -124,6 +124,14 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
 .drow{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .drow label{min-width:70px;margin:0}
 .drow input{flex:1;min-width:90px}
+.presence{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin:8px 0 2px;padding:8px 12px;border-radius:14px;background:rgba(255,255,255,.08);font:800 14px/1.2 var(--body)}
+.presence.on{background:rgba(90,214,143,.2);border:1px solid rgba(90,214,143,.5)}
+.presence.off{color:var(--ink-dim);font-weight:700}
+.presence .heart{padding:7px 12px;font-size:13px}
+#rotate{display:none;position:fixed;inset:0;z-index:999;place-items:center;text-align:center;padding:24px;background:#1b1420;color:#fff;font:800 22px/1.3 var(--display)}
+#rotate span{display:block;font-size:64px;margin-bottom:12px;animation:rot 1.8s ease-in-out infinite}
+@keyframes rot{0%,20%{transform:rotate(0)}60%,100%{transform:rotate(-90deg)}}
+@media (orientation:portrait) and (pointer:coarse){#rotate{display:grid}}
 .countdown{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 2px}
 .countdown span{padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.1);font:700 13px/1.2 var(--body)}
 .countdown b{color:var(--gold)}
@@ -325,6 +333,7 @@ details.settings summary{cursor:pointer;font:800 12px/1 var(--body);letter-spaci
 </div>
 
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<div id="rotate" role="alert"><div><span>📱</span>Turn your phone sideways to play</div></div>
 <script type="module">
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -349,7 +358,7 @@ const SAVE_KEY = 'arrys-world-save-v1';
 let save = { xp:0, coins:0, found:[], journal:[], custom:[], who:'arry', seenHint:false };
 try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); if (s) save = Object.assign(save, s); } catch(e) {}
 let persistWarned = false;
-function persist(){ try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch(e) { if (!persistWarned && typeof toast === 'function'){ persistWarned = true; toast('The phone is running out of room for memories. Save a backup in Settings.', true); } } }
+function persist(){ try { sharedPush(); } catch(e) {} try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch(e) { if (!persistWarned && typeof toast === 'function'){ persistWarned = true; toast('The phone is running out of room for memories. Save a backup in Settings.', true); } } }
 
 /* ---------- sound ---------- */
 let actx = null;
@@ -2267,9 +2276,9 @@ const GARDEN = [[1, 'Flower beds'], [2, 'Bunting'], [3, 'A swing'], [5, 'A tramp
 function strHash(str){ let h = 2166136261; for (let i = 0; i < str.length; i++){ h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
 function dailyKey(date = todayKey()){ const h = strHash((save.family || '0000') + '|' + date); return [h % 9, Math.floor(h/9) % 9, Math.floor(h/81) % 9]; }
 function ritual(){ if (!save.ritual || save.ritual.date !== todayKey()) save.ritual = { date:todayKey(), done:{}, startedAt:0 }; return save.ritual; }
-function markRitual(step){ const r = ritual(); if (!r.startedAt) r.startedAt = Date.now(); r.done[step] = true; persist(); }
+function markRitual(step){ const r = ritual(); if (!r.startedAt) r.startedAt = Date.now(); r.done[step] = true; persist(); ritualPush(); }
 const isArryPhone = () => save.role === 'arry';
-function togetherOpen(){ if (!isArryPhone()) return true; const u = save.unlock; return !!u && u.date === todayKey() && Date.now() - u.at < 30*60e3 && !ritual().done.goodbye; }
+function togetherOpen(){ if (!isArryPhone()) return true; if (net.on && net.partnerOnline && !ritual().done.goodbye) return true; const u = save.unlock; return !!u && u.date === todayKey() && Date.now() - u.at < 30*60e3 && !ritual().done.goodbye; }
 function freeLeft(){ const f = save.free || {}; const allow = (save.freeAllow ?? 20)*60; return f.date === todayKey() ? Math.max(0, allow - f.used) : allow; }
 let playMode = 'together'; // 'together' or 'free'
 function todaysCard(){
@@ -2280,7 +2289,7 @@ function todaysCard(){
   if (kind === 'thankful') return { kind, title:'Thankful for...', text:THANKFUL[d % THANKFUL.length] };
   return { kind, title:'Our story', text:'Add the next part of our bedtime story. Arry says a sentence, then Dad says one.' };
 }
-function scrap(entry){ save.scrapbook = save.scrapbook || []; save.scrapbook.unshift(Object.assign({ date:todayKey(), t:Date.now() }, entry)); save.scrapbook = save.scrapbook.slice(0, 200); persist(); }
+function scrap(entry){ save.scrapbook = save.scrapbook || []; const e = Object.assign({ date:todayKey(), t:Date.now(), from:save.role || activeId }, entry); save.scrapbook.unshift(e); save.scrapbook = save.scrapbook.slice(0, 200); persist(); scrapPush(e); }
 function nextStep(){ const r = ritual(); return activeSteps().find(s => !r.done[s.id]); }
 function keyIcons(ids){ return ids.map(i => KEY_ICONS[i]).join(' '); }
 function isBigFriday(){ return new Date().getDay() === 5; }
@@ -2307,7 +2316,7 @@ function weekInfo(){
   const m = ((Math.round((today - a)/86400000) % 14) + 14) % 14;
   return { withDad: m < 7, day: m, sleeps: m < 7 ? 0 : 14 - m, handover: m === 0 || m === 7 };
 }
-function setWeek(withDad){ const mon = lastMonday(); if (!withDad) mon.setDate(mon.getDate() - 7); save.dadWeek = ymd(mon); persist(); }
+function setWeek(withDad){ const mon = lastMonday(); if (!withDad) mon.setDate(mon.getDate() - 7); save.dadWeek = ymd(mon); save.cfgAt = Date.now(); persist(); }
 function countdownHtml(){
   const bits = []; const w = weekInfo();
   if (w && !w.withDad) bits.push(w.sleeps === 1 ? (isArryPhone() ? '🏡 Tomorrow Dad fetches you from school!' : '🏡 Tomorrow you fetch Arry from school!') : `🏡 <b>${w.sleeps}</b> sleeps until Dad's week`);
@@ -2340,7 +2349,7 @@ function datesSheet(){
     ${rows.map(([w, n]) => { const c = cur[w] || {}, [mo, da] = (c.md || '-').split('-'); return `<div class="field drow"><label>${n || 'Someone else'}</label>${w === 'sis' ? `<input data-n="${w}" maxlength="14" placeholder="Name" value="${esc(c.name || '')}">` : ''}<select data-d="${w}"><option value="">Day</option>${Array.from({ length:31 }, (_, i) => `<option${+da === i + 1 ? ' selected' : ''}>${i + 1}</option>`).join('')}</select><select data-m="${w}"><option value="">Month</option>${months.map((m, i) => `<option value="${i + 1}"${+mo === i + 1 ? ' selected' : ''}>${m}</option>`).join('')}</select></div>`; }).join('')}
     <div class="row"><button class="play" id="dtSave">Save</button><button class="btn2" id="dtCancel">Cancel</button></div>`);
   $('#dtCancel').onclick = hideSheet;
-  $('#dtSave').onclick = () => { const c = $('#sheetCard'); save.special = rows.map(([w, n]) => { const d = c.querySelector(`[data-d="${w}"]`).value, m = c.querySelector(`[data-m="${w}"]`).value, nm = w === 'sis' ? c.querySelector(`[data-n="${w}"]`).value.trim() : n; return d && m && nm ? { who:w, name:nm, md:String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0') } : null; }).filter(Boolean); persist(); hideSheet(); openMenu(false); };
+  $('#dtSave').onclick = () => { const c = $('#sheetCard'); save.special = rows.map(([w, n]) => { const d = c.querySelector(`[data-d="${w}"]`).value, m = c.querySelector(`[data-m="${w}"]`).value, nm = w === 'sis' ? c.querySelector(`[data-n="${w}"]`).value.trim() : n; return d && m && nm ? { who:w, name:nm, md:String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0') } : null; }).filter(Boolean); save.cfgAt = Date.now(); persist(); hideSheet(); openMenu(false); };
 }
 function stickerSheet(){
   const have = new Map((save.stickers || []).map(x => [x.i, x.date]));
@@ -2425,6 +2434,95 @@ function loadBackup(){
   inp.click();
 }
 
+
+/* =========================================================
+   The link between the two phones (Firebase Realtime Database)
+   ========================================================= */
+const FB_CONFIG = { apiKey:'AIzaSyBWS90fgGMsu-k5YVvEo0-w4b8Z7iArl0w', authDomain:'arrys-world.firebaseapp.com', databaseURL:'https://arrys-world-default-rtdb.europe-west1.firebasedatabase.app', projectId:'arrys-world', appId:'1:318825747150:web:e363d7fa1c4bae918ff69f' };
+const FB_VER = '10.12.2', FB_URL = n => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${n}.js`;
+const net = { on:false, starting:false, error:'', partnerOnline:false, remote:null, remoteAt:0, lastSend:0, lastShared:'', lastRitual:'', day:'', sent:new Set() };
+const otherRole = () => save.role === 'dad' ? 'arry' : 'dad', roleName = r => r === 'dad' ? 'Dad' : 'Arry';
+const linkId = () => (save.link || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const LINK_WORDS = ['KUDU', 'PROTEA', 'HADEDA', 'BRAAI', 'ZEBRA', 'MANGO', 'ROOIBOS', 'KAROO', 'SPRINGBOK', 'JACARANDA', 'BILTONG', 'GIRAFFE', 'MEERKAT', 'SUNBIRD', 'ALOE', 'BAOBAB'];
+function makeLinkCode(){ const r = n => crypto.getRandomValues(new Uint32Array(1))[0] % n; return `${LINK_WORDS[r(16)]}-${String(r(1e6)).padStart(6, '0')}-${LINK_WORDS[r(16)]}`; }
+function menuRefresh(){ if ((state.mode === 'menu' || state.mode === 'paused') && $('#sheet').hidden) openMenu(state.mode === 'paused'); }
+function sharedPick(){ return { days:save.days || 0, stickers:save.stickers || [], story:save.story || [], challenges:save.challenges || [], cfg:{ at:save.cfgAt || 0, family:save.family || '', dadWeek:save.dadWeek || '', special:save.special || [], freeAllow:save.freeAllow ?? 20 } }; }
+function sharedMerge(r){
+  if (!r){ net.lastShared = ''; sharedPush(); return; } let changedDays = false;
+  const rc = r.cfg || {}; const more = (save.days || 0) > (r.days || 0) || (save.stickers || []).length > Object.keys(r.stickers || {}).length || (save.story || []).length > Object.keys(r.story || {}).length || (save.challenges || []).length > Object.keys(r.challenges || {}).length || (save.cfgAt || 0) > (rc.at || 0) || (!!save.family && !rc.family);
+  if ((r.days || 0) > (save.days || 0)){ save.days = r.days; changedDays = true; }
+  const st = new Map((save.stickers || []).map(x => [x.i, x])); for (const x of Object.values(r.stickers || {})) if (!st.has(x.i)) st.set(x.i, x); save.stickers = [...st.values()];
+  const rs = Object.values(r.story || {}); if (rs.length > (save.story || []).length) save.story = rs;
+  const ch = new Map((save.challenges || []).map(c => [c.date, c])); for (const c of Object.values(r.challenges || {})){ const m = ch.get(c.date); if (!m || (m.done === undefined && c.done !== undefined)) ch.set(c.date, c); } save.challenges = [...ch.values()];
+  const c = r.cfg; if (c && (c.at || 0) > (save.cfgAt || 0)){ save.cfgAt = c.at; if (c.family) save.family = c.family; save.dadWeek = c.dadWeek || save.dadWeek; save.special = Object.values(c.special || {}); save.freeAllow = c.freeAllow ?? save.freeAllow; }
+  if (c && c.family && !save.family) save.family = c.family;
+  net.lastShared = more ? '' : JSON.stringify(sharedPick()); net.muteShared = true; persist(); net.muteShared = false; if (more) sharedPush();
+  if (changedDays) buildGarden(); updateStats(); menuRefresh();
+}
+function sharedPush(){ if (!net.on || net.muteShared) return; const j = JSON.stringify(sharedPick()); if (j === net.lastShared) return; net.lastShared = j; net.D.set(net.root('shared'), JSON.parse(j)).catch(() => {}); }
+function ritualPush(){ if (!net.on) return; const r = ritual(); const o = { done:r.done || {}, startedAt:r.startedAt || 0, bedtime:!!r.bedtime, moods:r.moods || {} }; const j = JSON.stringify(o); if (j === net.lastRitual) return; net.lastRitual = j; net.D.update(net.root('ritual/' + r.date), o).catch(() => {}); }
+function ritualMerge(v){
+  if (!v) return; const r = ritual(); let ch = false;
+  for (const k of Object.keys(v.done || {})) if (!r.done[k]){ r.done[k] = true; ch = true; }
+  if (v.startedAt && (!r.startedAt || v.startedAt < r.startedAt)){ r.startedAt = v.startedAt; ch = true; }
+  if (v.bedtime !== undefined && !!v.bedtime !== !!r.bedtime && Object.keys(r.done).length <= 1){ r.bedtime = !!v.bedtime; ch = true; }
+  r.moods = r.moods || {}; const o = otherRole(), m = (v.moods || {})[o];
+  if (m && r.moods[o] !== m){ r.moods[o] = m; ch = true; if (save.role === 'dad' && (m === 'Sad' || m === 'Worried')) toast(`Arry is feeling ${m.toLowerCase()} today. Maybe ask what's on her mind. 💛`, true); else toast(`${roleName(o)} is feeling ${m.toLowerCase()}!`, true); }
+  if (ch){ persist(); menuRefresh(); }
+}
+function scrapId(e){ return e.id || (e.id = `${e.t}-${(e.from || save.role || 'x')}-${Math.floor(Math.random()*1e5)}`); }
+function scrapPush(e){ if (!net.on) return; const id = scrapId(e); if (net.sent.has(id)) return; net.sent.add(id); const o = JSON.parse(JSON.stringify(e)); o.by = save.role; net.D.set(net.root('scrap/' + id), o).then(() => { e.synced = true; persist(); }).catch(() => net.sent.delete(id)); }
+function scrapRemote(id, e){
+  if (!e) return; save.scrapbook = save.scrapbook || []; if (save.scrapbook.some(x => x.id === id)) return;
+  e.id = id; e.synced = true; save.scrapbook.push(e); save.scrapbook.sort((a, b) => b.t - a.t);
+  save.scrapbook.forEach((x, i) => { if (i >= 60) x.img = x.img && null; if (i >= 15 && x.audio) x.audio = null; });
+  if (e.type === 'gift' && e.by && e.by !== save.role && e.t > (save.seenGiftAt || 0)){ save.unseen = (save.unseen || 0) + 1; if (net.booted) toast(`💌 New in the letterbox from ${roleName(e.by)}!`, true); }
+  clearTimeout(net.scrapT); net.scrapT = setTimeout(() => { persist(); menuRefresh(); }, 400);
+}
+function netEvent(ev){
+  if (!ev || ev.by === save.role || Math.abs(Date.now() - ev.t) > 30000) return;
+  if (ev.type === 'hug' && !ritual().done.goodbye){ if ((state.mode === 'menu' || state.mode === 'paused') && $('#sheet').hidden){ toast(`${roleName(ev.by)} is giving you a hug! 🤗`, true); goodbyeScene(true); } else toast(`${roleName(ev.by)} is ready for the goodbye hug! Open the menu when you're done. 🤗`, true); }
+  if (ev.type === 'heart'){ toast(`${roleName(ev.by)} is thinking of you 💛`, true); sfx.win(); }
+  if (ev.type === 'emote' && state.mode === 'play'){ buddy().pose = { type:ev.pose, until:performance.now()/1000 + 1.2 }; }
+}
+function netSend(type, extra){ if (net.on) net.D.push(net.root('events'), Object.assign({ type, by:save.role, t:Date.now() }, extra)).catch(() => {}); }
+async function netStart(){
+  if (net.on || net.starting || !save.role || !linkId()) return; net.starting = true; net.error = '';
+  try {
+    const [A, U, D] = await Promise.all([import(FB_URL('app')), import(FB_URL('auth')), import(FB_URL('database'))]);
+    const app = A.initializeApp(FB_CONFIG); await U.signInAnonymously(U.getAuth(app));
+    const db = D.getDatabase(app), fid = linkId(); net.D = D; net.root = p => D.ref(db, `families/${fid}/${p}`); net.day = todayKey();
+    if (activeId !== save.role){ activeId = save.role; save.who = activeId; }
+    const me = net.root('presence/' + save.role);
+    D.onValue(D.ref(db, '.info/connected'), sn => { if (sn.val()){ D.onDisconnect(me).remove(); D.set(me, { t:Date.now() }); net.on = true; sharedPush(); ritualPush(); (save.scrapbook || []).filter(e => !e.synced).slice(0, 80).forEach(scrapPush); } else { net.on = false; } menuRefresh(); });
+    D.onValue(net.root('presence/' + otherRole()), sn => { const was = net.partnerOnline; net.partnerOnline = !!sn.val(); if (net.partnerOnline && !was){ if (isArryPhone() && !ritual().done.goodbye){ save.unlock = { date:todayKey(), at:Date.now() }; playMode = 'together'; persist(); } toast(`🟢 ${roleName(otherRole())} is here!`, true); sfx.win(); } menuRefresh(); });
+    D.onValue(net.root('shared'), sn => sharedMerge(sn.val()));
+    D.onValue(net.root('ritual/' + net.day), sn => ritualMerge(sn.val()));
+    D.onChildAdded(D.query(net.root('scrap'), D.limitToLast(120)), sn => scrapRemote(sn.key, sn.val()));
+    D.onValue(net.root('live/' + otherRole()), sn => { net.remote = sn.val(); net.remoteAt = performance.now(); });
+    D.onChildAdded(D.query(net.root('events'), D.limitToLast(1)), sn => netEvent(sn.val()));
+    setTimeout(() => net.booted = true, 4000);
+  } catch(e){ net.error = String(e && e.message || e).slice(0, 120); menuRefresh(); }
+  net.starting = false;
+}
+function netTick(now){
+  if (!net.on) return;
+  if (now - net.lastSend > 220){ net.lastSend = now; const a = state.inCar ? car : active(); const m = state.mode === 'play' ? 'play' : state.mode;
+    const o = { x:+a.pos.x.toFixed(2), z:+a.pos.z.toFixed(2), f:+(state.inCar ? car.yaw : a.face).toFixed(2), c:state.inCar ? 1 : 0, m };
+    const j = JSON.stringify(o); if (j !== net.lastLive){ net.lastLive = j; net.D.set(net.root('live/' + save.role), o).catch(() => {}); } }
+}
+// when the other phone is in the world too, their character is really them
+function remoteBuddy(dt){
+  const r = net.remote; if (!net.on || !net.partnerOnline || !r || r.m !== 'play' || r.c) return false;
+  const b = buddy(), dx = r.x - b.pos.x, dz = r.z - b.pos.z, d = Math.hypot(dx, dz);
+  if (d > 14) b.place(r.x, r.z, r.f);
+  else if (d > .2){ const sp = Math.min(b.maxSpeed*1.4, d*4.5); b.moveToward(dx/d*sp, dz/d*sp, dt, 9); }
+  else { b.moveToward(0, 0, dt); b.face = r.f; }
+  b.physics(dt); b.animate(dt); b.sync(); return true;
+}
+addEventListener('pointerdown', () => { try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {}); } catch(e) {} }, { once:true });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && net.day && net.day !== todayKey()) location.reload(); });
+
 function ritualStep(id){
   ensureAudio();
   if (id === 'hello') return helloSheet();
@@ -2446,7 +2544,7 @@ function helloSheet(){
   const card = $('#sheetCard');
   card.querySelectorAll('[data-chal]').forEach(b => b.onclick = () => { pend.done = b.dataset.chal === 'yes'; let stk = null; if (pend.done){ save.xp += 30; sfx.coin(); scrap({ type:'challenge', text:pend.text, done:true }); stk = awardSticker(); } persist(); b.closest('.qcard').innerHTML = `<p>${pend.done ? `Brilliant! +30 XP${stk ? ` and a new sticker: ${stk[0]} ${esc(stk[1])}` : ''}` : 'No worries, there is always next time.'}</p>`; });
   card.querySelectorAll('[data-mood]').forEach(b => b.onclick = () => {
-    const [e, l] = MOODS[+b.dataset.mood]; ritual().mood = l; markRitual('hello'); sfx.step();
+    const [e, l] = MOODS[+b.dataset.mood]; const rr = ritual(); rr.mood = l; rr.moods = rr.moods || {}; rr.moods[save.role || activeId] = l; markRitual('hello'); sfx.step();
     if (l === 'Worried' || l === 'Sad') card.innerHTML = `<h2>${e} Thanks for telling me</h2><p>${isArryPhone() ? 'Dad is here. You can tell him what is on your mind, or you can just play. Either is OK.' : 'Gentle idea: ask what is on her mind, or start with a joke and a hug in the game.'}</p><div class="row"><button class="play" id="hNext">Next</button></div>`;
     else card.innerHTML = `<h2>${e} ${l}!</h2><p>Lekker. Let's go.</p><div class="row"><button class="play" id="hNext">Next</button></div>`;
     $('#hNext').onclick = () => { hideSheet(); openMenu(false); };
@@ -2486,7 +2584,8 @@ function challengeSheet(){
   showSheet(`<div class="eyebrow">Together Time · Real-world challenge</div><h2>Before next time...</h2><div class="qcard"><p class="big">${esc(text)}</p></div><p>Next time you open the game, you'll tell each other how it went.</p><div class="row"><button class="play" id="cAcc">We accept!</button></div>`);
   $('#cAcc').onclick = () => { save.challenges = (save.challenges || []).filter(c => c.date !== todayKey()); save.challenges.push({ date:todayKey(), text }); markRitual('challenge'); sfx.step(); hideSheet(); openMenu(false); };
 }
-function goodbyeScene(){
+function goodbyeScene(fromRemote){
+  if (!fromRemote) netSend('hug');
   hideSheet(); $('#menu').hidden = true; $('#hud').hidden = true;
   clearMissionObjects(); ms = null; resetToHome();
   const cx = 12, cz = 54.5; dad.place(cx - .32, cz, Math.PI/2); arry.place(cx + .32, cz, -Math.PI/2); dog.mode = 'stay'; dog.place(cx + .2, cz + 1.3, Math.PI);
@@ -2498,22 +2597,6 @@ function goodbyeScene(){
     const r = ritual(); const first = !r.done.goodbye; markRitual('goodbye');
     let stk = null; if (first){ save.days = (save.days || 0) + 1; save.xp += 50; stk = awardSticker(); }
     const unlocked = GARDEN.find(([n]) => n === save.days); buildGarden();
-(function decorate(){
-  const sp = specialToday(); if (!sp) return; const G = new THREE.Group(); scene.add(G);
-  if (sp.who === 'xmas'){
-    mesh(new THREE.ConeGeometry(1.4, 2.4, 10), mat('#2f7a3e'), G, 15, 1.5, 49.5); mesh(new THREE.ConeGeometry(1.1, 1.9, 10), mat('#3a8c48'), G, 15, 2.7, 49.5); box(G, .3, .5, .3, '#6b4630', 15, 0, 49.5);
-    mesh(new THREE.OctahedronGeometry(.25), new THREE.MeshStandardMaterial({ color:'#fff1a0', emissive:'#ffd35a', emissiveIntensity:2.5 }), G, 15, 3.8, 49.5, false);
-    for (let i = 0; i < 18; i++){ const a = i*2.4, y = .9 + (i/18)*2.4, rr = 1.3 - (i/18)*.9; mesh(new THREE.SphereGeometry(.09, 6, 4), new THREE.MeshStandardMaterial({ color:['#ff4a4a', '#ffd35a', '#5ac8ff'][i % 3], emissive:['#ff4a4a', '#ffd35a', '#5ac8ff'][i % 3], emissiveIntensity:1.5 }), G, 15 + Math.cos(a)*rr, y, 49.5 + Math.sin(a)*rr, false); }
-    for (let i = 0; i < 4; i++) box(G, .5, .4, .5, ['#ff5d9e', '#3d8bff', '#ffd25a', '#5ac06a'][i], 14 + i*.6, 0, 48.4 + (i % 2)*.4);
-    return;
-  }
-  const cols = ['#ff5d9e', '#ffd25a', '#5ac8ff', '#7ad07a', '#b48aff', '#ff7a4a'];
-  for (const [bx, bz] of [[8, 46.5], [16, 46.5], [12, 58], [-10, 0], [20, 0]]){
-    for (let i = 0; i < 5; i++){ const x = bx + (Math.random() - .5)*1.2, z = bz + (Math.random() - .5)*1.2, h = 2.4 + Math.random()*1.2;
-      mesh(new THREE.SphereGeometry(.35, 14, 10), new THREE.MeshStandardMaterial({ color:cols[i % 6], roughness:.25, metalness:.05 }), G, x, h, z).scale.set(1, 1.18, 1);
-      mesh(new THREE.CylinderGeometry(.008, .008, h - .3, 3), mat('#ffffff'), G, bx, (h - .3)/2, bz, false); }
-  }
-})();
     persist(); updateStats();
     showSheet(`<div class="big-done"><div class="eyebrow">Together Time</div><h2>See you tomorrow!</h2></div>
       <p style="text-align:center">That's <b>${save.days} day${save.days === 1 ? '' : 's'} together</b> in Arry's World.${unlocked ? `<br>New in your garden: <b>${unlocked[1]}</b> 🌱` : ''}${stk ? `<br>New sticker: <span style="font-size:26px">${stk[0]}</span> <b>${esc(stk[1])}</b>` : ''}</p>
@@ -2538,6 +2621,23 @@ function buildGarden(){
   if (n >= 20){ box(G, .1, 2.6, .1, '#2d2d2d', 23, 0, 52); mesh(new THREE.OctahedronGeometry(.35), new THREE.MeshStandardMaterial({ color:'#fff4b0', emissive:'#ffd35a', emissiveIntensity:2.5 }), G, 23, 2.9, 52, false); }
 }
 buildGarden();
+setTimeout(netStart, 300);
+(function decorate(){
+  const sp = specialToday(); if (!sp) return; const G = new THREE.Group(); scene.add(G);
+  if (sp.who === 'xmas'){
+    mesh(new THREE.ConeGeometry(1.4, 2.4, 10), mat('#2f7a3e'), G, 15, 1.5, 49.5); mesh(new THREE.ConeGeometry(1.1, 1.9, 10), mat('#3a8c48'), G, 15, 2.7, 49.5); box(G, .3, .5, .3, '#6b4630', 15, 0, 49.5);
+    mesh(new THREE.OctahedronGeometry(.25), new THREE.MeshStandardMaterial({ color:'#fff1a0', emissive:'#ffd35a', emissiveIntensity:2.5 }), G, 15, 3.8, 49.5, false);
+    for (let i = 0; i < 18; i++){ const a = i*2.4, y = .9 + (i/18)*2.4, rr = 1.3 - (i/18)*.9; mesh(new THREE.SphereGeometry(.09, 6, 4), new THREE.MeshStandardMaterial({ color:['#ff4a4a', '#ffd35a', '#5ac8ff'][i % 3], emissive:['#ff4a4a', '#ffd35a', '#5ac8ff'][i % 3], emissiveIntensity:1.5 }), G, 15 + Math.cos(a)*rr, y, 49.5 + Math.sin(a)*rr, false); }
+    for (let i = 0; i < 4; i++) box(G, .5, .4, .5, ['#ff5d9e', '#3d8bff', '#ffd25a', '#5ac06a'][i], 14 + i*.6, 0, 48.4 + (i % 2)*.4);
+    return;
+  }
+  const cols = ['#ff5d9e', '#ffd25a', '#5ac8ff', '#7ad07a', '#b48aff', '#ff7a4a'];
+  for (const [bx, bz] of [[8, 46.5], [16, 46.5], [12, 58], [-10, 0], [20, 0]]){
+    for (let i = 0; i < 5; i++){ const x = bx + (Math.random() - .5)*1.2, z = bz + (Math.random() - .5)*1.2, h = 2.4 + Math.random()*1.2;
+      mesh(new THREE.SphereGeometry(.35, 14, 10), new THREE.MeshStandardMaterial({ color:cols[i % 6], roughness:.25, metalness:.05 }), G, x, h, z).scale.set(1, 1.18, 1);
+      mesh(new THREE.CylinderGeometry(.008, .008, h - .3, 3), mat('#ffffff'), G, bx, (h - .3)/2, bz, false); }
+  }
+})();
 
 /* =========================================================
    Game state, input, camera
@@ -2880,14 +2980,14 @@ function openMenu(paused){
   }
   if (isArryPhone() && !open && !paused){
     html += `<div class="today gate"><div class="eyebrow">Together Time · ${esc(dayStr)}</div><h2>${r.done.goodbye ? 'See you tomorrow! 💛' : 'The garden gate is locked'}</h2>
-      ${countdownHtml()}<p>${r.done.goodbye ? 'Together Time is finished for today. You can look through your scrapbook or draw something for next time.' : 'When Dad calls, ask him for <b>today\'s key</b> and tap the three pictures.'}</p>
+      ${countdownHtml()}${presenceHtml()}<p>${r.done.goodbye ? 'Together Time is finished for today. You can look through your scrapbook or draw something for next time.' : 'When Dad calls, ask him for <b>today\'s key</b> and tap the three pictures.'}</p>
       ${r.done.goodbye ? '' : `<div class="slots">${[0, 1, 2].map(i => `<span>${keyEntry[i] !== undefined ? KEY_ICONS[keyEntry[i]] : ''}</span>`).join('')}</div><div class="keypad">${KEY_ICONS.map((e, i) => `<button data-key="${i}" aria-label="Key picture ${i + 1}">${e}</button>`).join('')}</div>`}</div>`;
   } else if (save.role || !paused){
     const steps = activeSteps().map(st => `<button class="step${r.done[st.id] ? ' done' : ''}${nxt && nxt.id === st.id ? ' cur' : ''}" data-ritual="${st.id}"><span>${r.done[st.id] ? '✓' : st.icon}</span>${st.label}</button>`).join('');
     const mins = r.startedAt ? Math.floor((Date.now() - r.startedAt)/60000) : 0;
     html += `<div class="today"><div class="eyebrow">Together Time · ${esc(dayStr)}</div>
-      ${countdownHtml()}
-      ${save.role === 'dad' ? `<div class="dadkey"><span>Today's key for Arry</span><b>${keyIcons(dailyKey())}</b></div>` : ''}
+      ${countdownHtml()}${presenceHtml()}
+      ${save.role === 'dad' && !(net.on && net.partnerOnline) ? `<div class="dadkey"><span>Today's key for Arry</span><b>${keyIcons(dailyKey())}</b></div>` : ''}
       <div class="steps">${steps}</div>
       ${nxt ? `<h2>${nxt.icon} ${nxt.id === 'adventure' ? esc(ritualMission().title) : esc(nxt.label === 'Chat' ? todaysCard().title : nxt.label)}</h2><p>${esc(stepBlurb(nxt.id))}</p><div class="row"><button class="play" data-ritual="${nxt.id}">${r.startedAt ? 'Next' : (r.bedtime ? 'Start bedtime' : 'Start Together Time')}</button>${!r.startedAt && !r.bedtime && new Date().getHours() >= 18 ? '<button class="btn2" data-act="bedtime">🌙 Quick bedtime version</button>' : ''}${!r.startedAt && r.bedtime ? '<button class="btn2" data-act="fulltime">Full version</button>' : ''}</div>` : `<h2>All done today 💛</h2><p>Lovely session. Come back tomorrow for a new question, adventure and challenge.</p>`}
       <div class="meta" style="margin-top:12px"><span>${r.bedtime ? 'About 5 minutes' : 'About 15 minutes'}</span>${r.startedAt && !r.done.goodbye ? `<span>${mins} min so far</span>` : ''}<span>${save.days || 0} days together</span></div></div>`;
@@ -2904,12 +3004,12 @@ function openMenu(paused){
     html += `<div class="today free"><div class="eyebrow">Free play</div><h2>Show your friends</h2><p>${left > 0 ? `Explore Makhanda and play the mini-games with a friend. <b>${Math.ceil(left/60)} minutes</b> left today.` : 'Free play is finished for today. See you at Together Time!'}</p>${left > 0 ? '<div class="row"><button class="play" data-act="free">Free play</button></div>' : ''}</div>`;
   }
   html += `<div class="sect"><h3>Our stuff</h3><div class="mlist">
-    <button class="mcard" data-act="scrapbook"><b>📖 Scrapbook</b><span>${(save.scrapbook || []).length} memories</span></button>
+    <button class="mcard" data-act="scrapbook"><b>📖 Scrapbook</b><span>${save.unseen ? `💌 ${save.unseen} new in the letterbox` : `${(save.scrapbook || []).length} memories`}</span></button>
     <button class="mcard" data-act="stickers"><b>⭐ Sticker book</b><span>${(save.stickers || []).length} of ${STICKERS.length}</span></button>
     <button class="mcard" data-act="garden"><b>🌱 Our garden</b><span>${save.days || 0} days together</span></button>
     <button class="mcard" data-act="draw"><b>✏️ Draw something</b><span>For next time</span></button>
     ${(!isArryPhone() || open) ? '<button class="mcard" data-act="explore"><b>🧭 Explore</b><span>Wander around town</span></button>' : ''}</div></div>`;
-  html += `<div class="seg"><span class="lab">Who's playing?</span><div class="opts">
+  if (!linkId()) html += `<div class="seg"><span class="lab">Who's playing?</span><div class="opts">
       <button data-who="arry" aria-pressed="${activeId === 'arry'}"><i class="av arry">A</i>Arry</button>
       <button data-who="dad" aria-pressed="${activeId === 'dad'}"><i class="av dad">D</i>Dad</button></div></div>`;
   html += `<div class="wardrobe">${['arry', 'dad'].map(id => `<div class="wrow"><span class="lab">${id === 'dad' ? "Dad's outfit" : "Arry's outfit"}</span><div class="chips">${Object.entries(OUTFITS[id]).map(([k, o]) => `<button class="chip" data-outfit="${id}:${k}" aria-pressed="${save.outfit[id] === k}">${esc(o.label)}</button>`).join('')}</div></div>`).join('')}</div>`;
@@ -2925,6 +3025,12 @@ function openMenu(paused){
   $('#menuPanel').innerHTML = html; addSpeakers($('#menuPanel'));
 }
 let keyEntry = [];
+function presenceHtml(){
+  if (!linkId() || !save.role) return '';
+  const o = roleName(otherRole()), m = (ritual().moods || {})[otherRole()], me = MOODS.find(x => x[1] === m);
+  if (!net.on) return `<div class="presence off">${net.error ? 'Could not connect: ' + esc(net.error) : 'Connecting the phones...'}</div>`;
+  return `<div class="presence${net.partnerOnline ? ' on' : ''}"><span>${net.partnerOnline ? `🟢 ${o} is here!` : `⚪ ${o} isn't in the game right now`}${me ? ` · feeling ${me[0]} ${m.toLowerCase()}` : ''}</span><button class="btn2 heart" data-act="heart" aria-label="Send a thinking-of-you heart">💛 Send a heart</button></div>`;
+}
 function stepBlurb(id){
   return { stars:'Lie on the lawn, look at the stars and make a wish.', hello:'Pick how you are both feeling today.', question:todaysCard().text, adventure:ritualMission().blurb, gift:'Leave a drawing or note in the letterbox.', challenge:'Pick a tiny real-world challenge for before next time.', goodbye:'A big hug and see you tomorrow.' }[id];
 }
@@ -2934,18 +3040,21 @@ function setupSheet(){
     <p>Whose phone is this?</p><div class="row"><button class="btn2 role" data-role="dad"><i class="av dad">D</i> Dad's phone</button><button class="btn2 role" data-role="arry"><i class="av arry">A</i> Arry's phone</button></div>
     <div class="field"><label for="suCode">Family code (4 numbers, the same on both phones)</label><input id="suCode" inputmode="numeric" maxlength="4" value="${esc(save.role === 'dad' ? save.family || '' : '')}" placeholder="e.g. 2412"></div>
     <div class="field"><label for="suFree">Free play allowed on Arry's phone each day</label><select id="suFree">${[0, 15, 20, 30].map(m => `<option value="${m}"${(save.freeAllow ?? 20) === m ? ' selected' : ''}>${m} minutes</option>`).join('')}</select></div>
+    <div class="field"><label for="suLink">Link code (connects the two phones; the same on both)</label><div class="drow"><input id="suLink" maxlength="40" autocapitalize="characters" value="${esc(save.link || '')}" placeholder="e.g. KUDU-123456-ALOE"><button class="btn2" id="suMake" type="button">Make one</button></div></div>
     <p id="suErr" style="color:#ff9e9e" hidden></p><div class="row"><button class="play" id="suSave">Save</button><button class="btn2" id="suCancel">Cancel</button></div>`);
   let role = save.role || null;
   $('#sheetCard').querySelectorAll('.role').forEach(b => { b.setAttribute('aria-pressed', b.dataset.role === role); b.onclick = () => { role = b.dataset.role; $('#sheetCard').querySelectorAll('.role').forEach(x => x.classList.toggle('sel', x === b)); }; if (b.dataset.role === role) b.classList.add('sel'); });
+  $('#suMake').onclick = () => { $('#suLink').value = makeLinkCode(); };
   $('#suCancel').onclick = hideSheet;
   $('#suSave').onclick = () => {
     const err = m => { const e = $('#suErr'); e.hidden = false; e.textContent = m; };
     if (needCode && $('#suOld').value !== save.family) return err('That family code is not right.');
-    const code = $('#suCode').value.trim(); if (!role) return err('Choose whose phone this is.'); if (!/^\d{4}$/.test(code)) return err('The family code needs 4 numbers.');
-    save.role = role; save.family = code; save.freeAllow = +$('#suFree').value; persist(); hideSheet(); openMenu(false);
+    const code = $('#suCode').value.trim(); if (!role) return err('Choose whose phone this is.'); if (!/^\d{4}$/.test(code) && !(role === 'arry' && !code && $('#suLink').value.trim())) return err('The family code needs 4 numbers.');
+    save.role = role; if (code) save.family = code; save.freeAllow = +$('#suFree').value; if (role === 'dad' || code) save.cfgAt = Date.now(); const lk = $('#suLink').value.trim(); if (lk !== (save.link || '')){ save.link = lk; persist(); hideSheet(); toast('Linking the phones...', true); setTimeout(() => location.reload(), 700); return; } save.cfgAt = Date.now(); persist(); hideSheet(); netStart(); openMenu(false);
   };
 }
 function scrapbookSheet(){
+  if (save.unseen){ save.unseen = 0; save.seenGiftAt = Date.now(); persist(); }
   const items = save.scrapbook || []; let html = `<h2>📖 Our scrapbook</h2>`;
   if (!items.length) html += `<p>Drawings, notes, answers and adventures from Together Time will collect here.</p>`;
   let last = '';
@@ -2987,6 +3096,7 @@ $('#menuPanel').addEventListener('click', e => {
   if (a === 'setup') setupSheet();
   if (a === 'stickers') stickerSheet();
   if (a === 'dates') datesSheet();
+  if (a === 'heart'){ netSend('heart'); toast(`Heart sent to ${roleName(otherRole())} 💛`, true); }
   if (a === 'backup') saveBackup();
   if (a === 'restore') loadBackup();
   if (a === 'bedtime' || a === 'fulltime'){ ritual().bedtime = a === 'bedtime'; persist(); openMenu(false); }
@@ -3614,6 +3724,7 @@ const flag = scene.getObjectByName('flag');
 let loopErrors = 0; const fpsMon = { t:0, n:0 };
 let envTuneT = 0;
 function frame(now){
+  netTick(now);
   if ((envTuneT -= 1) <= 0){ envTuneT = 120; tuneEnv(); } try { step(now); } catch(e){ if (loopErrors++ < 5) console.error(e); } requestAnimationFrame(frame); }
 function step(now){
   const dt = Math.min(.05, (now - last) / 1000); last = now; const t = now / 1000;
@@ -3632,7 +3743,7 @@ function step(now){
   if (state.mode === 'play' || state.mode === 'done' || state.mode === 'paused' || state.mode === 'cricket'){
     if (!state.inCar){
       const lead = active();
-      followLeader(buddy(), lead.pos, 1.8, dt);
+      if (!remoteBuddy(dt)) followLeader(buddy(), lead.pos, 1.8, dt);
       if (dog.mode === 'follow') followLeader(dog, lead.pos, 2.4, dt, [Math.sin(t*.7)*1.2, Math.cos(t*.7)*1.2]);
       else { dog.moveToward(0, 0, dt); dog.physics(dt); dog.animate(dt); dog.sync(); if (dog.mode === 'lost') { dog.face += dt*.8; } }
     } else if (dog.mode !== 'follow'){ dog.moveToward(0, 0, dt); dog.physics(dt); dog.animate(dt); dog.sync(); }
@@ -3708,5 +3819,5 @@ window.__set = (d, a) => { setOutfit('dad', d); setOutfit('arry', a); };
 window.__dog = () => ({ x:dog.pos.x, z:dog.pos.z, mode:dog.mode });
 window.__dbg = { mg:() => mg, winMini:() => { mg.st.forceScore = mg.g.target; endMini(); }, cr:() => cr, renderer, scene, completeStep:() => completeStep(), endCricket:() => { cr.active = false; cr.runs = 20; endCricket(); } };
 window.__npcs = () => npcs.map(n => [n.pos.x, n.pos.z]);
-window.__aw = { extra:[BIG_FRIDAY, BDAY_MISSION, XMAS_MISSION], state, MISSIONS, startMission, active, car, enterCar, exitCar, PLACES, cam, input, openCricket, ms:() => ms };
+window.__aw = { buddy, net, netStart, extra:[BIG_FRIDAY, BDAY_MISSION, XMAS_MISSION], state, MISSIONS, startMission, active, car, enterCar, exitCar, PLACES, cam, input, openCricket, ms:() => ms };
 </script>
