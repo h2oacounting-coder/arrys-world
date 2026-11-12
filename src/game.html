@@ -637,7 +637,7 @@ function fcell(x, z){ const i = Math.floor(x/FCELL), j = Math.floor(z/FCELL), k 
   if (!c){ c = { cx:(i + .5)*FCELL, cz:(j + .5)*FCELL, trees:[], near:{}, detail:{}, gNear:new THREE.Group(), gDetail:new THREE.Group(), gFar:new THREE.Group(), gKit:new THREE.Group(), gHouseFar:new THREE.Group() };
     c.gNear.visible = c.gDetail.visible = c.gKit.visible = false; scene.add(c.gNear, c.gDetail, c.gFar, c.gKit, c.gHouseFar); fcells.set(k, c); } return c; }
 // Places beyond the town are their own little maps, far away on the same grid and reached through a gate
-const ZONES = { town:{ name:'Makhanda', cx:WCX, cz:WCZ, r:BOUND }, gardens:{ name:'Botanical Gardens', cx:3000, cz:0, r:58 }, kingswood:{ name:'Kingswood College', cx:6000, cz:0, r:64 } };
+const ZONES = { town:{ name:'Makhanda', cx:WCX, cz:WCZ, r:BOUND }, gardens:{ name:'Botanical Gardens', cx:3000, cz:0, r:58 }, kingswood:{ name:'Kingswood College', cx:6000, cz:0, r:64 }, monument:{ name:'The Monument School of Magic', cx:9000, cz:0, r:60 } };
 function zoneAt(p){ let best = 'town', bd = 1e12; for (const [k, z] of Object.entries(ZONES)){ const d = Math.hypot(p.x - z.cx, p.z - z.cz); if (d < bd){ bd = d; best = k; } } return best; }
 function solidWorld(cx, cz, w, d){ colliders.push({ x0:cx-w/2, x1:cx+w/2, z0:cz-d/2, z1:cz+d/2 }); }
 function toWorld(g, lx, lz){ const c = Math.cos(g.rotation.y), s = Math.sin(g.rotation.y); return [g.position.x + lx*c + lz*s, g.position.z - lx*s + lz*c]; }
@@ -664,6 +664,7 @@ function resolve(p, r){
   if (bd > Z.r){ p.x = Z.cx + bx/bd*Z.r; p.z = Z.cz + bz/bd*Z.r; hit = true; }
   return hit;
 }
+function trunkAt(x, z){ for (const c of circles){ if (c.r < .4 || c.r > 1.2) continue; const dx = x - c.x, dz = z - c.z, rr = c.r*.6 + .3; if (dx*dx + dz*dz < rr*rr) return true; } return false; }
 function blocked(x, z, pad){
   for (const b of colliders) if (x > b.x0 - pad && x < b.x1 + pad && z > b.z0 - pad && z < b.z1 + pad) return true;
   return false;
@@ -802,6 +803,10 @@ const PLACES = {
   cathedral: { name:'The Cathedral',    pos:[0, -133],   r:7,   itemAt:[-6, -137]},
   park:      { name:'Jacaranda Park',   pos:[-70, 41],   r:6,   itemAt:[-74, 44] },
   garden:    { name:'Back Garden',      pos:[12, 53],    r:4.5, itemAt:[10, 55] },
+  mongate:   { name:'Monument Gate',    pos:[-30, -150], r:4,   itemAt:[-28, -148] },
+  hall:      { name:'The Great Hall',   pos:[9000, -8],  r:4,   itemAt:[9001, -7] },
+  potions:   { name:'Potions Room',     pos:[8974, 3],   r:3.5, itemAt:[8975, 4] },
+  owlery:    { name:'The Owl Tower',    pos:[9027, 2],   r:4,   itemAt:[9028, 3] },
   kwgate:    { name:'Kingswood Gate',   pos:[112, -50],  r:4,   itemAt:[114, -48] },
   quad:      { name:'The Quad',         pos:[6000, 6],   r:5,   itemAt:[6002, 8] },
   classroom: { name:'Classroom',        pos:[6028, 3],   r:3.5, itemAt:[6029, 4] },
@@ -1816,8 +1821,9 @@ class Walker {
     if (sp > .3){ const want = Math.atan2(this.vx, this.vz); this.face += wrapAng(want - this.face) * (1 - Math.exp(-17*dt)); }
     return sp;
   }
-  physics(dt){ this.vy -= (this.vy > 0 ? 19 : 31)*dt; this.y += this.vy*dt; if (this.y < 0){ if (this.vy < -5){ this.squash = 1; puff(this.pos.x, this.pos.z, 6); if (this === active()) buzz(12); } this.y = 0; this.vy = 0; } if (this.squash > 0) this.squash = Math.max(0, this.squash - dt*5); }
-  sync(){ this.g.position.set(this.pos.x, this.y, this.pos.z); this.g.rotation.y = this.face; if (this.bank !== undefined) this.g.rotation.z = this.bank; const q = this.squash || 0; if (q > 0 || this.g.scale.y !== 1){ const k = Math.sin(q*Math.PI)*.16; this.g.scale.set(1 + k*.6, 1 - k, 1 + k*.6); } }
+  physics(dt){ if (this.fly > 0){ this.fly -= dt; const ty = this.fly > .8 ? 2.3 + Math.sin(performance.now()/400)*.25 : 0; this.y += (ty - this.y)*Math.min(1, dt*3); this.vy = 0; if (this.fly <= 0){ this.y = Math.max(0, this.y); this.pose = null; if (this.broom) this.broom.visible = false; } return; }
+    this.vy -= (this.vy > 0 ? 19 : 31)*(this.floaty > 0 ? .3 : 1)*dt; this.y += this.vy*dt; if (this.y < 0){ if (this.vy < -5){ this.squash = 1; puff(this.pos.x, this.pos.z, 6); if (this === active()) buzz(12); } this.y = 0; this.vy = 0; } if (this.squash > 0) this.squash = Math.max(0, this.squash - dt*5); }
+  sync(){ this.g.position.set(this.pos.x, this.y, this.pos.z); this.g.rotation.y = this.face; if (this.bank !== undefined) this.g.rotation.z = this.bank; const q = this.squash || 0, sz = this.size || 1; if (q > 0 || this.g.scale.y !== sz){ const k = Math.sin(q*Math.PI)*.16; this.g.scale.set((1 + k*.6)*sz, (1 - k)*sz, (1 + k*.6)*sz); } }
   animate(dt){
     const sp = Math.hypot(this.vx, this.vz);
     if (sp > 4.6 && this.y === 0 && this.kind !== 'adult' && this.kind !== 'kid'){ this.dustT = (this.dustT || 0) - dt; if (this.dustT <= 0){ this.dustT = .22; puff(this.pos.x - this.vx*.05, this.pos.z - this.vz*.05, 1); } }
@@ -1840,6 +1846,7 @@ class Walker {
     if (p.until && t > p.until){ this.pose = null; return; }
     if (p.type === 'wave'){ r.armR.rotation.x = -2.75; r.armR.rotation.z = .3 + Math.sin(t*13)*.35; if (r.foreR) r.foreR.rotation.x = -.35; }
     else if (p.type === 'high5'){ r.armR.rotation.x = -2.95; r.armR.rotation.z = .12; if (r.foreR) r.foreR.rotation.x = -.05; }
+    else if (p.type === 'ride'){ r.legL.rotation.x = r.legR.rotation.x = -1.25; r.legL.rotation.z = .25; r.legR.rotation.z = -.25; r.shinL.rotation.x = r.shinR.rotation.x = 1.3; r.armL.rotation.x = r.armR.rotation.x = -1.0; r.armL.rotation.z = .25; r.armR.rotation.z = -.25; if (r.foreL){ r.foreL.rotation.x = r.foreR.rotation.x = -.4; } r.torso.rotation.x = .25; }
     else if (p.type === 'hug'){ r.armL.rotation.x = r.armR.rotation.x = -1.35; r.armL.rotation.z = .55; r.armR.rotation.z = -.55; if (r.foreL){ r.foreL.rotation.x = r.foreR.rotation.x = -.5; } r.torso.rotation.x = .12; r.head.rotation.z = Math.sin(t*2)*.08; }
     else if (p.type === 'cheer'){ r.armL.rotation.x = r.armR.rotation.x = -2.9; r.armL.rotation.z = -.35 + Math.sin(t*10)*.15; r.armR.rotation.z = .35 - Math.sin(t*10)*.15; }
     else if (p.type === 'sit'){
@@ -2177,6 +2184,11 @@ const MISSIONS = [
     { t:'mini', game:'stack', label:'Stack a milkshake 8 scoops high' },
     { t:'pickup', item:'milkshake', name:'Milkshakes', label:'Collect the milkshakes', atPlace:'goat' },
     { t:'goto', place:'park', label:'Find a bench in Jacaranda Park' } ] },
+  { id:'magic', title:'The School of Magic', blurb:'Up at the Monument there is a castle. Visit the Great Hall, brew a potion and send an owl.', steps:[
+    { t:'goto', place:'mongate', label:'Find the Monument gate near the Cathedral' },
+    { t:'goto', place:'hall', label:'Walk into the Great Hall' },
+    { t:'goto', place:'potions', label:'Find the potions room' },
+    { t:'goto', place:'owlery', label:'Visit the owl tower' } ] },
   { id:'kwday', title:'A Day at Kingswood', blurb:'Go through the school gate, ring the bell in the quad, try the blackboard quiz and finish at the tuck shop.', steps:[
     { t:'goto', place:'kwgate', label:'Find the Kingswood gate' },
     { t:'goto', place:'quad', label:'Walk to the quad' },
@@ -2445,6 +2457,7 @@ function buildZone(zid){
   const Z = ZONES[zid]; if (!Z || zid === 'town' || Z.built) return; Z.built = true;
   if (zid === 'gardens') buildGardens(Z);
   if (zid === 'kingswood') buildKingswood(Z);
+  if (zid === 'monument') buildMonument(Z);
 }
 function buildGardens(Z){
   const ox = Z.cx, oz = Z.cz, G = new THREE.Group(); scene.add(G);
@@ -2541,6 +2554,82 @@ function buildKingswood(Z){
     flora.flush(); };
   if (flora.ready) Z.plant();
 }
+
+function kitTower(x, z, floors, wall = 'UnevenBrick'){
+  if (!kit) return; const F = kit.frame(x, z, 0), W = 'Wall_' + wall + '_', PI = Math.PI;
+  for (let f = 0; f < floors; f++){ const y = f*3, w = f === floors - 1 ? 'Window_Thin_Round' : 'Straight';
+    for (const lx of [-1, 1]){ F(W + w, lx, y, 2, 0); F(W + w, lx, y, -2, PI); F(W + w, 2, y, lx, PI/2); F(W + w, -2, y, lx, -PI/2); }
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) F('Corner_Exterior_Wood', sx*2, y, sz*2); }
+  F('Roof_Tower_RoundTiles', 0, floors*3, 0);
+}
+function potionSheet(){
+  const ING = [['🍄', 'Mushroom'], ['🌸', 'Jacaranda petal'], ['🐸', 'Frog giggle'], ['⭐', 'Star dust'], ['🧦', "Dad's sock"], ['🍯', 'Honey']], picked = [];
+  const draw = () => { showSheet(`<div class="eyebrow">Potions room</div><h2>Pick three things for the cauldron</h2><div class="moods">${ING.map(([e, n], i) => `<button class="mood" data-i="${i}" ${picked.includes(i) ? 'style="background:rgba(255,194,61,.4)"' : ''}><span>${e}</span>${n}</button>`).join('')}</div><div class="row"><button class="play" id="pBrew" ${picked.length === 3 ? '' : 'disabled style="opacity:.5"'}>Stir and drink!</button><button class="btn2" id="pNo">Not now</button></div>`);
+    $('#pNo').onclick = hideSheet; $('#sheetCard').querySelectorAll('[data-i]').forEach(b => b.onclick = () => { const i = +b.dataset.i; if (picked.includes(i)) picked.splice(picked.indexOf(i), 1); else if (picked.length < 3) picked.push(i); sfx.step(); draw(); });
+    $('#pBrew').onclick = () => { if (picked.length < 3) return; hideSheet(); const k = picked.slice().sort().reduce((a, b) => a*7 + b + 1, 0) % 6, p = active();
+      const R2 = [['Floaty Feet', 'floaty', 'You can jump like you are on the moon!'], ['Zoom Juice', 'zoom', 'You are super fast!'], ['Tiny Tonic', 'tiny', 'You have shrunk!'], ['Giant Gulp', 'giant', 'You are enormous!'], ['Giggle Fizz', null, 'Hee hee hee! It just tickles.'], ['Rainbow Burp', null, 'BURP! Excuse you.']][k];
+      p.floaty = p.zoom = p.tiny = p.giant = 0; p.size = 1; if (R2[1]){ p[R2[1]] = 25; if (R2[1] === 'tiny') p.size = .55; if (R2[1] === 'giant') p.size = 1.5; }
+      for (let i = 0; i < 3; i++) setTimeout(() => sparkle(p.pos.x, 1 + i*.3, p.pos.z), i*200); tone(300, .2, 'sawtooth', .06); tone(600, .25, 'sine', .1, .15); tone(900, .3, 'sine', .08, .3); buzz(30);
+      toast(`${R2[0]}! ${R2[2]}`, true); p.pose = { type:'cheer', until:performance.now()/1000 + 1.2 }; if (k === 5) for (let i = 0; i < 5; i++) setTimeout(() => sparkle(p.pos.x + Math.sin(p.face)*i*.4, 1.3, p.pos.z + Math.cos(p.face)*i*.4), 300 + i*90); }; };
+  draw();
+}
+function startBroom(){
+  const p = active(); if (p.fly > 0) return;
+  if (!p.broom){ const b = new THREE.Group(); mesh(new THREE.CylinderGeometry(.025, .025, 1.5, 6), mat('#8b5a34'), b, 0, 0, .1, false).rotation.x = Math.PI/2; const br = mesh(new THREE.ConeGeometry(.16, .5, 8), mat('#d9a62e', { rough:.9 }), b, 0, 0, -.85, false); br.rotation.x = Math.PI/2; b.position.y = activeId === 'arry' ? .5 : .82; p.g.add(b); p.broom = b; }
+  p.broom.visible = true; p.fly = 30; p.pose = { type:'ride' }; toast('Hold on tight! Steer with the stick. 🧹', true); tone(500, .3, 'sine', .08); tone(800, .4, 'sine', .08, .2);
+}
+function buildMonument(Z){
+  const ox = Z.cx, oz = Z.cz, G = new THREE.Group(), PI = Math.PI; scene.add(G);
+  const ground = mesh(new THREE.CircleGeometry(78, 48), mat('#6fa654', { rough:1, detail:'grass', ao:false }), G, ox, 0, oz, false); ground.rotation.x = -PI/2; ground.receiveShadow = true;
+  const stone = mat('#b9b2a4', { rough:1, detail:'paving', ao:false });
+  box(G, 3.4, .05, 26, stone, ox, 0, oz + 43, { cast:false }); const yard = mesh(new THREE.CircleGeometry(15, 32), stone, G, ox, .04, oz + 12, false); yard.rotation.x = -PI/2; yard.receiveShadow = true;
+  box(G, 22, .05, 2.6, stone, ox - 14, 0, oz + 5, { cast:false }); box(G, 22, .05, 2.6, stone, ox + 14, 0, oz + 5, { cast:false });
+  // curtain wall with a gatehouse
+  if (kit){ const N = 60, Rr = 38; for (let i = 0; i < N; i++){ const a = i/N*PI*2, x = ox + Math.sin(a)*Rr, z = oz + 6 + Math.cos(a)*Rr; if (Math.abs(Math.sin(a)) < .09 && Math.cos(a) > 0) continue; for (let f = 0; f < 2; f++) kit.put('Wall_UnevenBrick_Straight', x, f*3, z, a, 2.0, 1, 1); } }
+  for (let i = 0; i < 60; i += 2){ const a = i/60*PI*2; if (Math.abs(Math.sin(a)) < .09 && Math.cos(a) > 0) continue; circles.push({ x:ox + Math.sin(a)*38, z:oz + 6 + Math.cos(a)*38, r:2.05 }); }
+  for (const sx of [-1, 1]){ kitTower(ox + sx*5.5, oz + 44, 3); solidWorld(ox + sx*5.5, oz + 44, 4.2, 4.2); mesh(new THREE.SphereGeometry(.22, 8, 6), new THREE.MeshStandardMaterial({ color:'#ffd9a0', emissive:'#ff9a2e', emissiveIntensity:2.2 }), G, ox + sx*3.2, 2.6, oz + 46.2, false); }
+  for (const a of [PI*.5, PI, PI*1.5, PI*.25, PI*.75, PI*1.25, PI*1.75]){ const x = ox + Math.sin(a)*38, z = oz + 6 + Math.cos(a)*38; kitTower(x, z, 3); solidWorld(x, z, 4.2, 4.2); }
+  // the Great Hall: walk in through the arches
+  const hx = ox, hz = oz - 16;
+  if (kit){ kit.room({ x:hx, z:hz, w:12, d:16, wall:'UnevenBrick', floor:'Floor_Brick', gaps:[['s', 2], ['s', 3]] }); for (const sx of [-1, 1]) for (const sz of [-1, 1]) kitTower(hx + sx*8.2, hz + sz*10.2, 4); }
+  else box(G, 12, .06, 16, '#9a8f80', hx, 0, hz, { cast:false });
+  solidWorld(hx, hz - 8.1, 12.4, .5); solidWorld(hx - 6.1, hz, .5, 16.4); solidWorld(hx + 6.1, hz, .5, 16.4); solidWorld(hx - 4, hz + 8.1, 4.4, .5); solidWorld(hx + 4, hz + 8.1, 4.4, .5);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) solidWorld(hx + sx*8.2, hz + sz*10.2, 4.2, 4.2);
+  for (const tx of [-3, 3]){ box(G, 1.1, .08, 11, '#7a4a2a', hx + tx, .78, hz - .5, { detail:'wood', ao:false }); for (const tz of [-5, 0, 5]) box(G, .9, .78, .14, '#5b3a22', hx + tx, 0, hz - .5 + tz, { cast:false }); for (const bx of [-.95, .95]) box(G, .36, .44, 11, '#8b5a34', hx + tx + bx, 0, hz - .5, { cast:false }); solidWorld(hx + tx, hz - .5, 1.2, 11);
+    for (let i = 0; i < 5; i++){ mesh(new THREE.CylinderGeometry(.16, .13, .06, 10), mat(['#e8443a', '#ffd25a', '#5ac06a', '#ff9a3a', '#b48aff'][i]), G, hx + tx, .86, hz - 4.5 + i*2, false); } }
+  box(G, 9, .5, 2.2, '#8a7f70', hx, 0, hz - 6.6, { cast:false }); box(G, 7, .08, 1, '#7a4a2a', hx, 1.28, hz - 6.6, { detail:'wood', ao:false });
+  zoneLife.candles = []; for (let i = 0; i < 22; i++){ const c = new THREE.Group(); mesh(new THREE.CylinderGeometry(.04, .04, .26, 6), mat('#fff6dc'), c, 0, 0, 0, false); mesh(new THREE.SphereGeometry(.05, 6, 5), new THREE.MeshStandardMaterial({ color:'#fff1b0', emissive:'#ffb02e', emissiveIntensity:3 }), c, 0, .18, 0, false); c.position.set(hx - 4.5 + Math.random()*9, 3 + Math.random()*1.4, hz - 6.5 + Math.random()*13); G.add(c); zoneLife.candles.push({ c, y:c.position.y, ph:Math.random()*6 }); }
+  ['#e8443a', '#3d8bff', '#ffd25a', '#5ac06a'].forEach((col, i) => { box(G, 1.4, 2.4, .06, col, hx - 4.5 + i*3, 1.2, hz - 7.7, { cast:false }); mesh(new THREE.CircleGeometry(.4, 5), mat('#fff4d0'), G, hx - 4.5 + i*3, 2.5, hz - 7.64, false); });
+  // potions room
+  const qx = ox - 26, qz = oz - 2;
+  if (kit) kit.room({ x:qx, z:qz, w:8, d:8, wall:'UnevenBrick', floor:'Floor_UnevenBrick', south:false }); else box(G, 8, .06, 8, '#7d766c', qx, 0, qz, { cast:false });
+  solidWorld(qx, qz - 4.1, 8.4, .5); solidWorld(qx - 4.1, qz, .5, 8.4); solidWorld(qx + 4.1, qz, .5, 8.4);
+  zoneLife.bubbles = []; for (const [dx, col] of [[-2, '#7ad07a'], [0, '#b48aff'], [2, '#ff7ab0']]){ mesh(new THREE.SphereGeometry(.55, 16, 10, 0, PI*2, PI*.35, PI*.65), mat('#2d2d33', { rough:.4, metal:.5 }), G, qx + dx, .62, qz - 1.6); mesh(new THREE.CircleGeometry(.44, 16), new THREE.MeshStandardMaterial({ color:col, emissive:col, emissiveIntensity:.8 }), G, qx + dx, .86, qz - 1.6, false).rotation.x = -PI/2; circles.push({ x:qx + dx, z:qz - 1.6, r:.6 });
+    for (let i = 0; i < 4; i++){ const b = mesh(new THREE.SphereGeometry(.07, 8, 6), new THREE.MeshStandardMaterial({ color:col, emissive:col, emissiveIntensity:1.2, transparent:true, opacity:.8 }), G, qx + dx, 1, qz - 1.6, false); zoneLife.bubbles.push({ b, x:qx + dx, z:qz - 1.6, ph:i*.25 + dx }); } }
+  box(G, 7, 2.2, .4, '#6b4630', qx, 0, qz - 3.6, { detail:'wood', ao:false }); for (let i = 0; i < 14; i++) mesh(new THREE.CylinderGeometry(.09, .11, .3, 8), new THREE.MeshStandardMaterial({ color:pick(['#ff5d9e', '#5ac8ff', '#ffd25a', '#7ad07a', '#b48aff']), roughness:.2, transparent:true, opacity:.85 }), G, qx - 3 + (i % 7), 1.1 + Math.floor(i/7)*.7 + 1.1 - 1.1, qz - 3.35, false).position.y = (i < 7 ? 1.3 : 2.35);
+  spots.push({ x:qx, z:qz - .4, r:2.0, label:'BREW', fn:potionSheet });
+  // owl tower and the broom stand
+  const wx = ox + 27, wz = oz - 4; kitTower(wx, wz, 5); solidWorld(wx, wz, 4.2, 4.2); if (!kit) box(G, 4, 15, 4, '#9a8f80', wx, 0, wz);
+  zoneLife.owls = []; for (let i = 0; i < 5; i++){ const o = new THREE.Group(), bm = mat(pick(['#8a6a4a', '#c9b08a', '#f4efe6', '#6b5a4a']), { rough:.9 }); mesh(new THREE.SphereGeometry(.22, 10, 8), bm, o, 0, 0, 0).scale.set(1, 1.25, .9); mesh(new THREE.SphereGeometry(.17, 10, 8), bm, o, 0, .3, .02); for (const sx of [-1, 1]){ mesh(new THREE.SphereGeometry(.06, 8, 6), mat('#fff4b0'), o, sx*.07, .32, .15, false); mesh(new THREE.SphereGeometry(.03, 6, 5), mat('#111111'), o, sx*.07, .32, .2, false); mesh(new THREE.ConeGeometry(.04, .1, 4), bm, o, sx*.1, .47, 0, false); } mesh(new THREE.ConeGeometry(.03, .08, 4), mat('#ffb02e'), o, 0, .27, .18, false).rotation.x = PI/2;
+    const a = i/5*PI*2; box(G, .06, 1.6 + i*.25, .06, '#6b4630', wx + Math.sin(a)*3.4, 0, wz + Math.cos(a)*3.4, { cast:false }); o.position.set(wx + Math.sin(a)*3.4, 1.85 + i*.25, wz + Math.cos(a)*3.4); o.rotation.y = a; G.add(o); zoneLife.owls.push({ o, home:o.position.clone(), a, t:0 }); }
+  spots.push({ x:wx, z:wz + 4.6, r:2.2, label:'OWL POST', fn(){ const ow = zoneLife.owls[Math.floor(Math.random()*zoneLife.owls.length)]; ow.t = 4; tone(440, .18, 'sine', .08); tone(350, .3, 'sine', .08, .2); if (net.on){ netSend('owl'); toast(`An owl is flying to ${roleName(otherRole())}! 🦉`, true); } else toast('The owl hoots and does a loop for you. 🦉', true); } });
+  const bx = ox + 9, bz = oz + 14; box(G, 1.6, 1.1, .12, '#6b4630', bx, 0, bz, { detail:'wood', ao:false }); for (let i = 0; i < 3; i++){ const b = mesh(new THREE.CylinderGeometry(.025, .025, 1.6, 6), mat('#8b5a34'), G, bx - .5 + i*.5, .85, bz + .2, false); b.rotation.x = .25; mesh(new THREE.ConeGeometry(.12, .4, 8), mat('#d9a62e'), G, bx - .5 + i*.5, .2, bz + .4, false); }
+  spots.push({ x:bx, z:bz + 1, r:1.8, label:'FLY', fn:startBroom }); circles.push({ x:bx, z:bz, r:.8 });
+  // magic stars to find
+  [[-20, 24], [24, 26], [-33, -18], [16, -30], [0, -22], [32, 12]].forEach(([dx, dz], i) => { const m = mesh(new THREE.OctahedronGeometry(.2), new THREE.MeshStandardMaterial({ color:'#fff1a0', emissive:'#ffd35a', emissiveIntensity:2 }), G, ox + dx, .5, oz + dz, false); addFind('monument', i, ox + dx, oz + dz, G, 'Magic star', '⭐', 6); });
+  if (kit) kit.flush(() => G);
+  addPortal('monument', ox, oz + 56, 0, 'Back to town', 'town', PLACES.mongate.pos[0], PLACES.mongate.pos[1] + 3.2, 0);
+  Z.plant = () => { if (Z.planted) return; Z.planted = true; const put = flora.put, rnd = flora.rnd, tree = (name, x, z, sc) => { put('near', name, x, z, sc); fcell(x, z).trees.push(['cypress', x, z, 1.2]); circles.push({ x, z, r:.55 }); };
+    for (let i = 0; i < 44; i++){ const a = i/44*6.28, r = 46 + rnd()*22; const x = ox + Math.sin(a)*r, z = oz + 6 + Math.cos(a)*r; if (Math.abs(x - ox) < 5 && z > oz) continue; tree(i % 3 ? 'Pine_1' : 'Pine_2', x, z, 1.3 + rnd()*.5); }
+    for (let i = 0; i < 70; i++){ const a = rnd()*6.28, r = Math.sqrt(rnd())*36, x = ox + Math.cos(a)*r, z = oz + 6 + Math.sin(a)*r; if (!blocked(x, z, .6) && Math.hypot(x - ox, z - oz - 12) > 15) put('detail', rnd() < .5 ? 'Grass_Wispy_Tall' : (rnd() < .5 ? 'Mushroom_Common' : 'Fern_1'), x, z, .4 + rnd()*.25); }
+    flora.flush(); };
+  if (flora.ready) Z.plant();
+}
+function updateMonumentLife(dt, t){
+  for (const c of zoneLife.candles || []) c.c.position.y = c.y + Math.sin(t*1.3 + c.ph)*.12;
+  for (const b of zoneLife.bubbles || []){ const k = (t*.5 + b.ph) % 1; b.b.position.set(b.x + Math.sin(k*9 + b.ph)*.15, .9 + k*1.3, b.z); b.b.material.opacity = .85*(1 - k); }
+  for (const o of zoneLife.owls || []){ if (o.t > 0){ o.t -= dt; const k = 1 - o.t/4, r = 6; o.o.position.set(o.home.x + Math.sin(k*6.28)*r - 0, o.home.y + Math.sin(k*3.14)*4, o.home.z + (1 - Math.cos(k*6.28))*r - 0); o.o.rotation.y = k*6.28 + 1.57; if (o.t <= 0){ o.o.position.copy(o.home); o.o.rotation.y = o.a; } } else o.o.rotation.y = o.a + Math.sin(t*.8 + o.a)*.5; }
+}
 function makeFrog(parent, x, z){
   const g = new THREE.Group(); g.position.set(x, .1, z); parent.add(g); const gm = mat('#6fbf4a', { rough:.5 });
   mesh(new THREE.SphereGeometry(.16, 12, 8), gm, g, 0, .1, 0).scale.set(1, .7, 1.2); for (const sx of [-1, 1]){ mesh(new THREE.SphereGeometry(.055, 8, 6), gm, g, sx*.08, .2, .1, false); mesh(new THREE.SphereGeometry(.028, 6, 5), mat('#111111'), g, sx*.08, .22, .14, false); mesh(new THREE.SphereGeometry(.07, 8, 6), gm, g, sx*.15, .04, -.08, false).scale.set(1, .6, 1.4); }
@@ -2565,6 +2654,7 @@ function updateZoneLife(dt, t, zn){
   const p = active().pos;
   for (const d of zoneLife.finds){ if (d.found || d.zid !== zn) continue; d.halo.material.opacity = .2 + Math.sin(t*4 + d.i)*.1; if (Math.hypot(p.x - d.x, p.z - d.z) < 1.5 && state.mode === 'play'){ d.found = true; d.halo.material.opacity = 0; save.finds = save.finds || {}; (save.finds[zn] = save.finds[zn] || []).push(d.i); save.xp += 20; const n = save.finds[zn].length; sparkle(d.x, .6, d.z); sfx.coin(); buzz(15);
       if (n >= d.total){ save.xp += 100; const stk = awardSticker(); toast(`All ${n} found! ${stk ? 'New sticker: ' + stk[0] : '+100 XP'}`, true); sfx.win(); } else toast(`${d.what} ${n} of ${d.total}! ${d.emoji}`, true); persist(); updateStats(); } }
+  if (zn === 'monument' && ZONES.monument.built) updateMonumentLife(dt, t);
   if (zn !== 'gardens' || !ZONES.gardens.built) return; const Z = ZONES.gardens;
   for (const b of zoneLife.bfs){ const q = b.g.position, dx = b.tx - q.x, dz = b.tz - q.z, d = Math.hypot(dx, dz); if (d < .5){ b.tx = Z.cx + (Math.random() - .5)*90; b.tz = Z.cz + (Math.random() - .5)*90; b.ty = .8 + Math.random()*1.8; } else { q.x += dx/d*1.4*dt; q.z += dz/d*1.4*dt; q.y += (b.ty - q.y)*dt + Math.sin(t*6 + b.ph)*.01; b.g.rotation.y = Math.atan2(dx, dz); } const f = Math.sin(t*17 + b.ph)*.9; b.wl.rotation.y = -f; b.wr.rotation.y = f; }
   for (const f of zoneLife.frogs){ f.t -= dt; if (f.t <= 0){ f.t = 2 + Math.random()*5; f.hop = .5; f.g.rotation.y = Math.random()*6.28; if (Math.hypot(p.x - f.x, p.z - f.z) < 14) tone(180 + Math.random()*40, .09, 'square', .03); } if (f.hop > 0){ f.hop -= dt; f.g.position.y = .1 + Math.sin(clamp(f.hop/.5, 0, 1)*Math.PI)*.35; } }
@@ -2573,9 +2663,12 @@ function updateZoneLife(dt, t, zn){
 function goPlace(k){
   if (state.mode !== 'play'){ if (ms) beginPlay(); else startFreeExplore(); }
   if (k === 'gardens'){ travel('gardens', ZONES.gardens.cx, ZONES.gardens.cz + 49, Math.PI); return; }
+  if (k === 'monument'){ travel('monument', ZONES.monument.cx, ZONES.monument.cz + 51, Math.PI); return; }
   if (k === 'kingswood'){ travel('kingswood', ZONES.kingswood.cx, ZONES.kingswood.cz + 55, Math.PI); return; }
   const pl = PLACES[k]; const [x, z] = freeSpot(pl.pos[0] + 1.5, pl.pos[1] + pl.r*.6); travel(zoneAt({ x, z }), x, z, Math.atan2(pl.pos[0] - x, pl.pos[1] - z), true); toast(pl.name, true);
 }
+{ for (const c of [[-30, -150], [30, -150], [-40, -128], [40, -128], [-24, -168], [24, -168], [-46, -150]]) if (!blocked(c[0], c[1], 5)){ PLACES.mongate.pos = c; PLACES.mongate.itemAt = [c[0] + 2, c[1] + 2]; break; }
+  const [mx2, mz2] = PLACES.mongate.pos; addPortal('town', mx2, mz2, 0, 'The Monument', 'monument', ZONES.monument.cx, ZONES.monument.cz + 51, Math.PI); }
 { for (const c of [[112, -50], [104, -52], [120, -52], [112, -44], [98, -48], [124, -46]]) if (!blocked(c[0], c[1], 5)){ PLACES.kwgate.pos = c; PLACES.kwgate.itemAt = [c[0] + 2, c[1] + 2]; break; }
   const [kx, kz] = PLACES.kwgate.pos; addPortal('town', kx, kz, 0, 'Kingswood College', 'kingswood', ZONES.kingswood.cx, ZONES.kingswood.cz + 55, Math.PI); }
 { for (const c of [[-99, 44], [-102, 34], [-102, 54], [-96, 60], [-106, 44], [-96, 26], [-88, 64]]) if (!blocked(c[0], c[1], 6)){ PLACES.botgate.pos = c; PLACES.botgate.itemAt = [c[0] + 2, c[1] + 2]; break; }
@@ -2807,6 +2900,7 @@ function scrapRemote(id, e){
 function netEvent(ev){
   if (!ev || ev.by === save.role || Math.abs(Date.now() - ev.t) > 30000) return;
   if (ev.type === 'hug' && !ritual().done.goodbye){ if ((state.mode === 'menu' || state.mode === 'paused') && $('#sheet').hidden){ toast(`${roleName(ev.by)} is giving you a hug! 🤗`, true); goodbyeScene(true); } else toast(`${roleName(ev.by)} is ready for the goodbye hug! Open the menu when you're done. 🤗`, true); }
+  if (ev.type === 'owl'){ toast(`🦉 An owl arrived from ${roleName(ev.by)}: thinking of you!`, true); sfx.win(); }
   if (ev.type === 'heart'){ toast(`${roleName(ev.by)} is thinking of you 💛`, true); sfx.win(); }
   if (ev.type === 'emote' && state.mode === 'play'){ buddy().pose = { type:ev.pose, until:performance.now()/1000 + 1.2 }; }
 }
@@ -3088,7 +3182,8 @@ function updateWalker(dt, jx, jy){
   const mag = Math.min(1, Math.hypot(jx, jy));
   if (mag < .08){ mx = mz = 0; } else { const n = Math.hypot(mx, mz) || 1; mx = mx/n*mag; mz = mz/n*mag; }
   const sprint = mag > .9 || input.keys.has('shift');
-  const spd = sprint ? p.maxSpeed * 1.35 : p.maxSpeed * .95;
+  for (const k of ['floaty', 'zoom', 'tiny', 'giant']) if (p[k] > 0){ p[k] -= dt; if (p[k] <= 0){ p.size = 1; toast('The potion has worn off'); } }
+  const spd = (sprint ? p.maxSpeed * 1.35 : p.maxSpeed * .95) * (p.zoom > 0 ? 1.7 : 1) * (p.fly > 0 ? 1.5 : 1);
   const grounded = p.y <= .001;
   p.moveToward(mx*spd, mz*spd, dt, grounded ? 11 : 4.5);
   if (input.jump){ input.jumpBuf = .14; input.jump = false; } else input.jumpBuf = Math.max(0, (input.jumpBuf || 0) - dt);
@@ -3149,7 +3244,7 @@ function updateCamera(dt){
   const dist = (state.inCar ? 10.5 : (activeId === 'arry' ? 5.2 : 6.2)) * cam.zoom * (portrait() ? 1.22 : 1);
   const hd = dist * Math.cos(cam.pitch), vy = dist * Math.sin(cam.pitch);
   let reach = 1;
-  for (let f = .12; f <= 1.001; f += .06){ const x = focus.x + Math.sin(cam.yaw)*hd*f, z = focus.z + Math.cos(cam.yaw)*hd*f; if (blocked(x, z, .35)){ reach = Math.max(.12, f - .08); break; } }
+  for (let f = .12; f <= 1.001; f += .06){ const x = focus.x + Math.sin(cam.yaw)*hd*f, z = focus.z + Math.cos(cam.yaw)*hd*f; if (blocked(x, z, .35) || trunkAt(x, z)){ reach = Math.max(.12, f - .08); break; } }
   const want = new THREE.Vector3(focus.x + Math.sin(cam.yaw)*hd*reach, focus.y + fy + vy*Math.max(reach, .55), focus.z + Math.cos(cam.yaw)*hd*reach);
   const look = new THREE.Vector3(focus.x, focus.y + fy + (portrait() ? .55 : 0) + (cam.pitch < 0 ? -cam.pitch*1.2 : 0), focus.z);
   if (cam.snap){ cam.pos.copy(want); cam.look.copy(look); cam.snap = false; }
@@ -3339,7 +3434,7 @@ function openMenu(paused){
     if (canPlay){
       const t = ritualMission();
       html += `<div class="sect"><h3>Today's pick</h3><div class="mlist"><button class="mcard pickme" data-mission="${t.id}"><b>⭐ ${esc(t.title)}</b><span>${esc(t.blurb)}</span></button></div></div>`;
-      html += `<div class="sect"><h3>Go somewhere</h3><div class="chips go">${[['dad', '🏡 Home'], ['park', '🌸 Jacaranda Park'], ['gardens', '🌿 Botanical Gardens'], ['kingswood', '🏫 Kingswood'], ['oval', '🏏 The oval'], ['goat', '🥤 Grazing Goat'], ['cathedral', '⛪ Cathedral']].map(([k, l]) => `<button class="chip" data-go="${k}">${l}</button>`).join('')}</div></div>`;
+      html += `<div class="sect"><h3>Go somewhere</h3><div class="chips go">${[['dad', '🏡 Home'], ['park', '🌸 Jacaranda Park'], ['gardens', '🌿 Botanical Gardens'], ['kingswood', '🏫 Kingswood'], ['monument', '🏰 The Monument'], ['oval', '🏏 The oval'], ['goat', '🥤 Grazing Goat'], ['cathedral', '⛪ Cathedral']].map(([k, l]) => `<button class="chip" data-go="${k}">${l}</button>`).join('')}</div></div>`;
       html += miniGrid();
       html += `<div class="sect"><h3>Missions</h3><div class="mlist">${MISSIONS.filter(m => m.id !== t.id).map(m => `<button class="mcard" data-mission="${m.id}"><b>${esc(m.title)}</b><span>${m.steps.length} steps${playedToday(m.id) ? ' · <i class="tick">done today</i>' : ''}</span></button>`).join('')}<button class="mcard" data-act="explore"><b>🧭 Just explore</b><span>Wander around town</span></button></div></div>`;
       html += `<div class="sect"><h3>Your own missions</h3><div class="mlist">${save.custom.map(c => `<button class="mcard custom" data-custom="${c.id}"><b>${esc(c.title)}</b><span>${esc(PLACES[c.from].name)} → ${esc(PLACES[c.to].name)}</span></button>`).join('')}<button class="mcard custom" data-act="maker"><b>+ Make a mission</b><span>Turn something real into an adventure</span></button></div></div>`;
